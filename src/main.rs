@@ -1,4 +1,4 @@
-//! borrow — run heavy work on another machine, from a light one.
+//! borrow: run heavy work on another machine, from a light one.
 
 mod ssh;
 mod commands;
