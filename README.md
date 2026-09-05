@@ -2,9 +2,9 @@
 
 Run heavy work on another machine, from a light one.
 
-Stay in your normal environment (editor, terminal, browser) but run the *heavy* parts of
-development on a beefier box: builds, servers, databases, containers, models. Your files
-stay where they are. No VM, no remote desktop.
+Stay in your normal environment, meaning your editor, terminal, and browser, but run the
+heavy parts of development on a stronger box. Builds, servers, databases, containers, and
+models all go somewhere else. Your files stay where they are. No VM, and no remote desktop.
 
 ```bash
 borrow run cargo build
@@ -14,39 +14,36 @@ borrow run cargo build
 
 ## How it works
 
-Two machines:
+Two machines. The **Client** is where you type, and it stays light. The **Agent** is where
+the resources are, and it does the work.
 
-* **Client**, where you type. Stays light.
-* **Agent**, where the resources are. Does the work.
-
-A small daemon on the Agent handles pairing, health, and sessions. The actual execution
-rides on ssh, so there is no new protocol to trust.
+A small daemon on the Agent handles pairing, health, and sessions. Execution itself rides on
+ssh, so there is no new protocol to trust.
 
 Your source stays on the Client and is mounted onto the Agent. Build artifacts such as
-`target/`, `node_modules/` and virtualenvs live on the Agent's local disk. Mounting those
-is what makes remote development slow, so borrow keeps them off the mount automatically.
+`target/` and `node_modules/` live on the Agent's local disk, because mounting those is what
+makes remote development slow. Every remote command says where it ran.
 
 ## Status
 
-**Early. Not usable yet.** Building Phase 1: run a command on a paired machine and stream
-the output back.
-
-* [x] CLI skeleton
-* [ ] `borrow run`, execute remotely, stream output, pass exit codes through
-* [ ] `borrow link`, pair two machines
-* [ ] `borrow info` and `borrow health`, see the box's CPU, RAM, GPU
-* [ ] Mount and artifact split
-* [ ] Warm sessions, `ps` and `stop`
-* [ ] Works across networks, not just a LAN
+**Early. Not usable yet.** Partway through Phase 1. `borrow run` currently builds the ssh
+invocation and prints it rather than executing it.
 
 ## Building
 
 ```bash
 cargo build
 cargo run -- --help
+cargo test
 ```
 
-Requires Rust and an ssh connection to the machine you want to borrow.
+Requires a Rust toolchain, and an ssh connection to the machine you want to borrow.
+
+## Documentation
+
+`docs/GUIDE.md` is the full reference: architecture, design decisions, the security model,
+the phase roadmap, and the machine setup. `CLAUDE.md` is the rulebook for AI coding agents
+working in this repo.
 
 ## License
 
