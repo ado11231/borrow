@@ -1,9 +1,17 @@
 //! Building and running commands on the Agent over ssh.
 
+use anyhow::Context;
 use shell_words::join;
+use std::process::Stdio;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
 
-/// A command to run on the Agent. `cwd` and `env` are unused until for now
-/// The mounted project path and the artifact split variables.
+/// The exit code reported when the remote command was killed by a signal rather than
+/// exiting on its own. 130 is the shell convention for "terminated by SIGINT".
+const EXIT_SIGNALLED: i32 = 130;
+
+/// A command to run on the Agent. `cwd` and `env` are unused for now; they will carry
+/// the mounted project path and the artifact split variables in Phase 2.
 pub struct RemoteCommand {
     pub host: String,
     pub program: String,
@@ -22,6 +30,55 @@ impl RemoteCommand {
         );
 
         vec![self.host.clone(), command]
+    }
+
+    /// Spawn `ssh`, stream both output pipes to this terminal as they produce lines, and
+    /// return the remote command's exit code. Ctrl-C kills the ssh child, which drops the
+    /// connection and hangs up the remote process.
+    ///
+    /// Both pipes are drained to EOF before the child is reaped, because a process can
+    /// exit while bytes are still sitting in the OS buffer and reaping first loses them.
+    pub async fn execute(&self) -> anyhow::Result<i32> {
+        let mut child = Command::new("ssh")
+            .args(self.to_ssh_args())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("could not spawn ssh; check that it is installed and on PATH")?;
+
+        let stdout = child.stdout.take().context("ssh stdout was not captured")?;
+        let stderr = child.stderr.take().context("ssh stderr was not captured")?;
+
+        let mut out = BufReader::new(stdout).lines();
+        let mut err = BufReader::new(stderr).lines();
+
+        let interrupt = tokio::signal::ctrl_c();
+        tokio::pin!(interrupt);
+
+        let mut out_open = true;
+        let mut err_open = true;
+        let mut interrupted = false;
+
+        while out_open || err_open {
+            tokio::select! {
+                line = out.next_line(), if out_open => match line? {
+                    Some(line) => println!("{line}"),
+                    None => out_open = false,
+                },
+                line = err.next_line(), if err_open => match line? {
+                    Some(line) => eprintln!("{line}"),
+                    None => err_open = false,
+                },
+                _ = &mut interrupt, if !interrupted => {
+                    interrupted = true;
+                    child.start_kill().context("could not signal the ssh process")?;
+                }
+            }
+        }
+
+        let status = child.wait().await.context("waiting on ssh failed")?;
+
+        Ok(status.code().unwrap_or(EXIT_SIGNALLED))
     }
 }
 
