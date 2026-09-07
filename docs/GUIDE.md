@@ -786,6 +786,10 @@ the codebase is still small, before adding features.
 * `core/stack.rs` detecting `Cargo.toml`, `package.json`, and `pyproject.toml`.
 * `core/mount.rs` holding the artifact split rules per stack: environment variables and
   symlinks.
+* `link` extended to set up the **second trust**. Phase 1 builds only the Client to Agent
+  direction. The mount needs the mirror image: the Agent's public key installed on the
+  Client, and the Client's ssh host key learned by the Agent. The Client sshd check stops
+  being a warning and becomes a failure.
 * `agent/mounts.rs` automating the SSHFS mount, where the Agent pulls from the Client,
   checking whether it is already mounted and remounting if stale.
 * `core/config.rs` handling per project `borrow.toml` overrides.

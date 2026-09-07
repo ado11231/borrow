@@ -1,8 +1,8 @@
 //! The checks that stand in for an installer.
 //!
 //! For everyone who is not the author, these checks are the setup experience. Every
-//! failure prints the exact command that fixes it, and nothing is ever installed
-//! automatically. Every success prints a line too, so a working box visibly passes.
+//! failure prints the command that fixes it and nothing is installed automatically.
+//! Successes print a line too, so a working box visibly passes.
 
 use crate::telemetry::is_installed;
 use std::net::{SocketAddr, TcpStream};
@@ -119,9 +119,8 @@ pub fn tool_check(program: &str, state_when_missing: State) -> Check {
     }
 }
 
-/// The checks `borrow serve` runs before it starts listening. sshfs and rsync are
-/// warnings rather than failures, because Phase 1 has no mount yet and a box that
-/// can only run commands is still useful today.
+/// The checks `borrow serve` runs before it listens. sshfs and rsync are warnings
+/// rather than failures, because Phase 1 has no mount yet.
 pub fn serve_checks() -> Vec<Check> {
     let mut checks = vec![
         ssh_server_check(),

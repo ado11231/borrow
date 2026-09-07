@@ -12,10 +12,9 @@ use tokio::process::Command;
 /// exiting on its own. 130 is the shell convention for "terminated by SIGINT".
 const EXIT_SIGNALLED: i32 = 130;
 
-/// Options passed to every ssh call. BatchMode makes a missing or rejected key fail
-/// loudly instead of quietly falling back to asking for a password, which is the
-/// kind of thing you want to find out about immediately. The alive settings stop a
-/// long build from dying silently on an idle connection.
+/// Options passed to every ssh call. BatchMode fails loudly rather than quietly
+/// asking for a password. The alive settings keep a long build from dying on an
+/// idle connection.
 const SSH_OPTIONS: &[&str] = &[
     "BatchMode=yes",
     "ConnectTimeout=10",
@@ -25,14 +24,9 @@ const SSH_OPTIONS: &[&str] = &[
 
 /// Whether to ask ssh for a terminal on the box.
 ///
-/// A terminal is what makes ctrl-c actually stop the remote command: it gives that
-/// command a session, so dropping the connection hangs it up instead of leaving it
-/// running. The cost is that a terminal is one stream, so the box's stdout and
-/// stderr arrive merged and lines end in \r\n.
-///
-/// So ask for one only when a person is sat at the keyboard, meaning input and
-/// output are both terminals. The moment output is going to a file or a pipe, keep
-/// the clean separate streams that scripts need.
+/// A terminal is what makes ctrl-c stop the remote command, but it merges stderr
+/// into stdout and ends lines with \r\n. So ask for one only when a person is at
+/// the keyboard, and keep clean separate streams whenever output is redirected.
 fn wants_terminal() -> bool {
     use std::io::IsTerminal;
 
@@ -84,8 +78,7 @@ impl RemoteCommand {
     }
 
     /// The single string the remote shell will parse. Every piece is quoted first,
-    /// so spaces stay inside their argument and characters like `$` and `;` arrive
-    /// as literal text instead of being run.
+    /// so characters like `$` and `;` arrive as text instead of being run.
     pub fn command_line(&self) -> String {
         join(
             std::iter::once(self.program.as_str())
@@ -132,12 +125,9 @@ impl RemoteCommand {
         argv
     }
 
-    /// Spawn `ssh`, stream both output pipes to this terminal as they produce lines, and
-    /// return the remote command's exit code. Ctrl-C kills the ssh child, which drops the
-    /// connection and hangs up the remote process.
-    ///
-    /// Both pipes are drained to EOF before the child is reaped, because a process can
-    /// exit while bytes are still sitting in the OS buffer and reaping first loses them.
+    /// Spawn `ssh`, stream both pipes as lines arrive, and return the remote exit code.
+    /// Ctrl-c kills the ssh child. Both pipes are drained to EOF before the child is
+    /// reaped, because a process can exit with bytes still sitting in the OS buffer.
     pub async fn execute(&self) -> anyhow::Result<i32> {
         let mut child = Command::new("ssh")
             .args(self.to_ssh_args())
@@ -257,9 +247,8 @@ mod tests {
         );
     }
 
-    /// ssh splits this option's value on whitespace, because it can name several
-    /// files. Without quotes, a config directory containing a space silently
-    /// becomes two paths and the box looks unknown.
+    /// ssh splits this option on whitespace because it can name several files.
+    /// Without quotes a directory containing a space makes the box look unknown.
     #[test]
     fn a_terminal_is_requested_only_when_asked_for() {
         assert!(!remote(&["hi"]).to_ssh_args().contains(&"-t".to_string()));

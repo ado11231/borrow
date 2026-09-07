@@ -103,9 +103,20 @@ detail is in `docs/GUIDE.md`.
 
 ## Repo layout
 
-**Phase 1 is a single crate**, meaning `src/main.rs` plus modules. Split into the workspace
-below at Phase 2, once the shared seams are real. Do not create four crates before the first
-working command exists.
+**Today the repo is a single crate**, meaning `src/main.rs` plus modules. The workspace
+split below is the first task of Phase 2, now that the shared seams are visible: a second
+binary exists, so "do both sides use this?" is a question you can answer by looking rather
+than by guessing.
+
+Current modules and where each one lands after the split:
+
+| Module | Goes to | Why |
+| --- | --- | --- |
+| `protocol.rs`, `telemetry.rs` | `borrow-core` | both binaries use these types |
+| `config.rs` | splits | the Client's box list is not the daemon's own settings |
+| `ssh.rs`, `commands/` | `borrow-cli` | only the Client spawns ssh |
+| `agent.rs` | `borrow-agent` | the daemon binary |
+| `keys.rs`, `preflight.rs`, `client.rs` | `borrow-cli`, mostly | preflight is needed by both, so watch it |
 
 **End state, from Phase 2 onward:**
 
@@ -163,18 +174,31 @@ Each phase must leave a working, usable tool. Phase 4 gates publishing, because 
 
 ## Current state
 
-**Phase 1 is complete.** The tool works on a LAN: pair two machines, run commands on the
-box with live output, and see what the box is and what it is doing.
+**Phase 1 is complete. Phase 2 is the current phase.**
 
-What works: `serve` with preflight checks and a single use pairing code, `link` which
-installs borrow's own named key and learns the box's host keys, `run` with live streaming,
-real exit codes and a ctrl-c that stops the remote command, `info` from cache or refreshed,
-`health` live, `unlink`, and `--agent` selection. 29 tests.
+Phase 1 works on a LAN: `serve` with preflight checks and a single use pairing code, `link`
+which installs borrow's own named key and learns the box's host keys, `run` with live
+streaming, real exit codes and a ctrl-c that stops the remote command, `info` from cache or
+refreshed, `health` live, `unlink`, and `--agent` selection. 29 tests.
 
-What does not work yet: no mount, so commands run in the login directory rather than in
-your project. That is Phase 2 and it is the next thing to build. `cwd` and `env` on
-`RemoteCommand` are the placeholders waiting for it. LAN only until Phase 4. No sessions,
-`ps`, `stop` or `top` until Phase 3.
+**Phase 2 is the mount and the artifact split**, and it is what makes the tool worth using.
+In order: split the workspace, then `stack.rs` detection, then `mount.rs` split rules, then
+the reverse trust, then the SSHFS mount, then wire it into `run`. The first three need no
+second machine and are fully unit testable.
+
+Three things to know before starting Phase 2:
+
+* **`cwd` and `env` on `RemoteCommand` are the waiting slots.** They will carry the mounted
+  project path and the artifact split variables. `command_line` will need to emit
+  `cd <cwd> && env KEY=VAL ... <command>`, with every piece quoted by the same
+  `shell_words` path that already protects the arguments.
+* **SSHFS is a pull, so the mount runs on the Agent and connects back to the Client.** That
+  is the reverse of every connection borrow makes today. Phase 1 `link` installs the
+  Client's key on the Agent. Phase 2 needs the mirror image as well: the Agent's public key
+  on the Client, and the Client's host key known to the Agent. Two independent one way
+  trusts, and neither private key is ever copied.
+* **The Client sshd preflight warning becomes a failure.** `link` already warns when this
+  machine has no ssh server. In Phase 2 there is no mount without one.
 
 One deviation from `docs/GUIDE.md` worth knowing: `link` does not write a `~/.ssh/config`
 entry. Everything ssh needs lives in borrow's own config and is passed on the command line

@@ -7,8 +7,7 @@ use crate::preflight::{self, Check};
 use crate::protocol::{Request, Response};
 
 /// Take a pairing code, install this machine's key on the box, and save what it
-/// takes to reach it again. Every step says what it did, because pairing is the
-/// one moment borrow touches your ssh setup.
+/// takes to reach it again. Every step says what it did.
 pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
     let (host, port, token) = parse_code(&code)?;
     let client_name = this_machine();

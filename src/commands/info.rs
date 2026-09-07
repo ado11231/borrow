@@ -5,8 +5,7 @@ use crate::config::Config;
 use crate::protocol::{Request, Response, Specs};
 
 /// Print the box's static specs. These come from the cache saved at pairing, so the
-/// usual case is instant and works even when the box is asleep. `--refresh` asks
-/// the box again and updates the cache.
+/// usual case is instant and works even when the box is asleep.
 pub async fn info(agent: Option<String>, refresh: bool) -> anyhow::Result<i32> {
     let mut config = Config::load()?;
     let target = config.resolve(agent.as_deref())?.clone();

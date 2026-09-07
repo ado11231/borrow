@@ -52,7 +52,7 @@ impl Agent {
 }
 
 /// The platform's config directory for borrow. The only place that knows this
-/// path, so no OS-specific path appears anywhere else.
+/// path, so no OS specific path appears anywhere else.
 fn dir() -> anyhow::Result<PathBuf> {
     let Some(dirs) = ProjectDirs::from("", "", "borrow") else {
         anyhow::bail!("Could not determine home directory");
@@ -107,8 +107,7 @@ impl Config {
     }
 
     /// Pick the agent to use. An explicit `--agent` wins, then `default`, then the
-    /// sole agent if there is only one. A single box user never has to learn that
-    /// defaults exist.
+    /// sole agent if there is only one.
     pub fn resolve(&self, requested: Option<&str>) -> anyhow::Result<&Agent> {
         match (requested, self.default.as_deref()) {
             (Some(name), _) => self.find(name),

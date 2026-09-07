@@ -1,8 +1,7 @@
 //! `borrow serve`: the daemon that runs on the Agent.
 //!
-//! It answers questions about the box and hands out exactly one key at pairing time.
-//! It never runs your work. Commands travel over ssh instead, which is why this file
-//! stays small and has nothing resembling a shell in it.
+//! It answers questions about the box and hands out one key at pairing time. It
+//! never runs your work: commands travel over ssh instead.
 
 use crate::keys::marker;
 use crate::preflight;
@@ -138,8 +137,7 @@ fn answer(request: Request, agent: &Agent) -> Response {
 }
 
 /// Trade a valid token for an installed key. The token is taken out of the daemon
-/// before the key is written, so a second attempt with the same code finds nothing
-/// even if two Clients race each other.
+/// before the key is written, so two Clients racing cannot both pair.
 fn pair(agent: &Agent, token: &str, client: &str, public_key: &str) -> Response {
     let claimed = {
         let mut slot = agent.pairing.lock().expect("pairing lock was poisoned");
@@ -181,9 +179,8 @@ fn pair(agent: &Agent, token: &str, client: &str, public_key: &str) -> Response 
 }
 
 /// Add the Client's public key to authorized_keys, replacing any older key from the
-/// same Client. The file is read, changed in memory, and written back whole, because
-/// appending to a file that has no trailing newline joins two keys into one broken
-/// line and silently locks you out.
+/// same Client. The file is rewritten whole, because appending to one with no
+/// trailing newline joins two keys into a broken line and locks you out.
 fn install_key(client: &str, public_key: &str) -> anyhow::Result<PathBuf> {
     let key = public_key.trim();
 
@@ -236,8 +233,7 @@ fn set_mode(path: &std::path::Path, mode: u32) -> anyhow::Result<()> {
 }
 
 /// This box's ssh host keys, read from where sshd publishes them. Sending these at
-/// pairing is what lets the Client trust the box on its very first connection,
-/// instead of asking somebody to compare a fingerprint by eye.
+/// pairing lets the Client trust the box on its first connection.
 fn host_keys() -> Vec<String> {
     let Ok(entries) = fs::read_dir("/etc/ssh") else {
         return Vec::new();

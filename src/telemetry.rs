@@ -1,8 +1,8 @@
 //! Reading the box's specs and health.
 //!
-//! Everything here runs on the Agent. Collection is deliberately cheap: sysinfo for
-//! CPU, memory and disk, and a call out to nvidia-smi for GPU numbers. A box with no
-//! GPU is a normal box, not an error, so the GPU list simply comes back empty.
+//! Everything here runs on the Agent. Collection is cheap on purpose: sysinfo for
+//! CPU, memory and disk, nvidia-smi for GPU. A box with no GPU is normal, not an
+//! error, so the GPU list simply comes back empty.
 
 use crate::protocol::{Gpu, GpuHealth, Health, Specs};
 use std::process::Command;
@@ -14,8 +14,7 @@ const INTERESTING_TOOLS: &[&str] = &["docker", "podman", "sshfs", "rsync", "git"
 const BYTES_PER_MB: u64 = 1024 * 1024;
 
 /// Static facts about the box. `name` is passed in rather than read from the machine,
-/// because the display name is chosen at pairing and should not drift when the
-/// system hostname changes.
+/// because it is chosen at pairing and should not drift if the hostname changes.
 pub fn specs(name: &str) -> Specs {
     let mut sys = System::new_all();
     sys.refresh_all();

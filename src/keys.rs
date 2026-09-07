@@ -1,8 +1,7 @@
 //! The ssh key borrow uses, and nothing else.
 //!
-//! borrow keeps its own key rather than reusing your personal one. That way the key
-//! installed on a box is clearly borrow's, a human can spot it in authorized_keys,
-//! and `borrow unlink` can take it back out without touching anything you own.
+//! borrow keeps its own key rather than reusing your personal one, so the key on a
+//! box is clearly borrow's and `unlink` can take it back out.
 
 use crate::config;
 use anyhow::Context;
@@ -33,9 +32,8 @@ pub fn marker(client_name: &str) -> String {
     format!("borrow:{client_name}")
 }
 
-/// Find borrow's key, creating it the first time. Generating a key is announced out
-/// loud with the path, because a tool that quietly makes keys is a tool you cannot
-/// audit. Returns the private key path and the public key text to send over.
+/// Find borrow's key, creating it the first time. Generating one is announced with
+/// its path, because a tool that quietly makes keys cannot be audited.
 pub fn ensure(client_name: &str) -> anyhow::Result<(PathBuf, String)> {
     let private = private_key_path()?;
     let public = private.with_extension("pub");
@@ -72,9 +70,8 @@ fn host_pattern(host: &str, port: Option<u16>) -> String {
     }
 }
 
-/// Record a box's ssh host keys so the first connection works without anybody being
-/// asked to check a fingerprint. Older entries for the same box are replaced, which
-/// is what makes pairing again after a rebuild just work.
+/// Record a box's ssh host keys so the first connection needs no fingerprint check.
+/// Older entries are replaced, so pairing again after a rebuild still works.
 pub fn learn_host(host: &str, port: Option<u16>, host_keys: &[String]) -> anyhow::Result<PathBuf> {
     let file = config::known_hosts_path()?;
     let pattern = host_pattern(host, port);
