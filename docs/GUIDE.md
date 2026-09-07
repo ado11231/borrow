@@ -630,27 +630,45 @@ borrow top              # live continuously updating view
 
 ## Where things stand today
 
-**Status: early. Not usable yet.** The project is partway through Phase 1.
+**Status: Phase 1 is complete. The tool is usable on a LAN.** Pair two machines, run
+commands on the box with live output, and look at what the box is and what it is doing.
 
-What exists and works:
+What exists and works, all of it verified by running it rather than by reading it:
 
-* The clap skeleton, with `run` defined and dispatching correctly.
-* Correct pass through of remote flags, so `--release` and friends reach the remote program.
-* `RemoteCommand` and the construction of a properly quoted ssh argv.
-* A test suite covering the quoting rules, including the injection cases.
-* Exit code plumbing through `main`, ready for a real code to flow into it.
+* `borrow serve`, which runs preflight checks, prints a single use pairing code, and
+  listens on loopback plus the machine's real addresses. Never on `0.0.0.0`.
+* `borrow link <code>`, which generates borrow's own ssh key if there is not one, installs
+  it on the box, learns the box's ssh host keys, caches its specs, and saves all of it.
+* `borrow run <cmd>`, which streams stdout and stderr live, propagates the real exit code,
+  and stops the remote command on ctrl-c.
+* `borrow info` from the cache and `borrow info --refresh` from the box.
+* `borrow health` for a live snapshot of cpu, memory, disk, and gpu.
+* `borrow unlink`, which takes the key back off the box and forgets it.
+* `--agent` for picking a box, with sensible resolution when there is only one.
+* 29 tests covering quoting and injection, ssh argument building, pairing code parsing,
+  agent resolution, and the config round trip.
 
-What does **not** yet work, stated plainly:
+What does **not** work yet, stated plainly:
 
-* `borrow run` **does not actually execute anything remotely.** It builds the ssh argv and
-  prints it with `println!`, then returns `Ok(0)`. Spawning is the immediate next task.
-* The host is hardcoded to `"localbox"`. Configuration and pairing do not exist yet.
-* `cwd` and `env` on `RemoteCommand` are declared but unused. They are placeholders for the
-  Phase 2 mounted path and artifact split variables.
-* No daemon, no pairing, no `info`, no `health`, no mount.
+* No mount. Commands run in the login directory on the box, not in your project. This is
+  the whole of Phase 2 and it is what makes the tool worth using.
+* `cwd` and `env` on `RemoteCommand` are still declared and unused. They are the Phase 2
+  slots for the mounted path and the artifact split variables.
+* LAN only. Cross network use needs the Coordinator in Phase 4.
+* No warm sessions, no `ps`, no `stop`, no `top`. That is Phase 3.
+* `link` does not write a `~/.ssh/config` entry. It turned out not to need one: everything
+  ssh needs is stored in borrow's own config and passed on the command line, which leaves
+  your own ssh files alone.
 
-Two commits are in history: the clap skeleton with run dispatch, then building ssh
-invocations from parsed commands.
+Three things worth knowing, because each one was a real bug found by running the tool:
+
+* ssh splits `UserKnownHostsFile` on whitespace, so the path has to be quoted or a config
+  directory containing a space silently makes the box look unknown.
+* Without a terminal, a remote command outlives the connection. borrow asks for one only
+  when a person is at the keyboard, so ctrl-c works interactively without putting `\r\n`
+  and merged streams into a redirected build log.
+* `BatchMode=yes` matters. Without it ssh quietly falls back to asking for a password,
+  which is exactly the failure that should be loud.
 
 ## How the phases work
 
@@ -699,7 +717,7 @@ need fixing before automating it.
 
 The demoable core, and the tokio learning vehicle.
 
-**Status: in progress. This is the current phase.**
+**Status: complete.**
 
 **To implement**
 
@@ -757,7 +775,7 @@ with live output, and `borrow info` prints the box's specs. LAN only, no mount y
 
 Where the tool stops being a fancy ssh alias and starts being genuinely worth using.
 
-**Status: not started.**
+**Status: not started. This is the current phase.**
 
 **First, split the crate.** The seams are visible by now, so do the workspace split while
 the codebase is still small, before adding features.

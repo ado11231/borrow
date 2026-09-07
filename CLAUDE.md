@@ -163,19 +163,22 @@ Each phase must leave a working, usable tool. Phase 4 gates publishing, because 
 
 ## Current state
 
-The project is partway through Phase 1. Be accurate about this when writing documentation
-or status updates.
+**Phase 1 is complete.** The tool works on a LAN: pair two machines, run commands on the
+box with live output, and see what the box is and what it is doing.
 
-What works: the clap skeleton, correct pass through of remote flags, `RemoteCommand` and the
-construction of a properly quoted ssh argv, and tests covering the quoting and injection
-cases.
+What works: `serve` with preflight checks and a single use pairing code, `link` which
+installs borrow's own named key and learns the box's host keys, `run` with live streaming,
+real exit codes and a ctrl-c that stops the remote command, `info` from cache or refreshed,
+`health` live, `unlink`, and `--agent` selection. 29 tests.
 
-What does not work yet: `borrow run` builds the ssh argv and prints it rather than executing
-anything. The host is hardcoded to `"localbox"`. The `cwd` and `env` fields on
-`RemoteCommand` are declared but unused. There is no daemon, no pairing, no `info`, no
-`health`, and no mount.
+What does not work yet: no mount, so commands run in the login directory rather than in
+your project. That is Phase 2 and it is the next thing to build. `cwd` and `env` on
+`RemoteCommand` are the placeholders waiting for it. LAN only until Phase 4. No sessions,
+`ps`, `stop` or `top` until Phase 3.
 
----
+One deviation from `docs/GUIDE.md` worth knowing: `link` does not write a `~/.ssh/config`
+entry. Everything ssh needs lives in borrow's own config and is passed on the command line
+instead, so borrow never edits files you maintain by hand.
 
 ## Conventions
 
