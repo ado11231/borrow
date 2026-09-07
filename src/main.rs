@@ -1,5 +1,6 @@
 //! borrow: run heavy work on another machine, from a light one.
 
+mod config;
 mod ssh;
 mod commands;
 

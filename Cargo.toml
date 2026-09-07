@@ -8,3 +8,7 @@ clap = { version = "4.6.6", features = ["derive"] }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "process", "io-util", "signal"] }
 anyhow = "1.0.104"
 shell-words = "1.1.0"
+directories = "6.0.0"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.5"
+serde_json = "1.0.151"
