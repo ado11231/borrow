@@ -804,6 +804,32 @@ the codebase is still small, before adding features.
   SSHFS. Find out early whether polling is needed.
 * Never mount `target/`, `node_modules/`, or virtual environments. This is the entire point.
 
+**The baseline to beat.** Measured on archbox before any mount existed, building this crate
+from clean:
+
+| Build | Wall | User | Sys |
+| --- | --- | --- | --- |
+| `cargo build --release`, native, from clean | 8.7s | 1m31s | 3.2s |
+| `cargo build --release`, native, incremental | not measured yet | | |
+
+The incremental number is still to be taken, and it is the more important of the two. Run
+this on the Agent before the mount lands:
+
+```bash
+cd ~/borrow && touch src/main.rs && time cargo build --release
+```
+
+A clean build is CPU bound, which is the kindest case for a network filesystem. An
+incremental build is dominated by filesystem latency, because cargo stats thousands of
+files to work out what changed, and over SSHFS every one of those is a round trip. A clean
+build going from 8.7s to 12s is tolerable. A two second incremental going to forty is not,
+and that is the one that decides whether the tool is usable day to day.
+
+**Watch sys time, not just wall time.** Over SSHFS every file operation becomes a network
+round trip, so system time is the leading indicator that artifacts are landing on the mount.
+A wall time that crept up is ambiguous. A sys time that went from 3 seconds to 30 says
+exactly what went wrong.
+
 **Done when:** a real build on the mount is roughly as fast as a native build on the Agent,
 and the Client's fans stay off.
 
