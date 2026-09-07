@@ -1,24 +1,21 @@
-//! `borrow run <cmd>` execute a command on the Agent.
-use crate::ssh;
+//! `borrow run <cmd>`: run a command on the Agent.
 
-/// Run `cmd` on the Agent and return its exit code. A non-zero code is not an
-/// error: borrow did its job, the command it ran happened to fail.
-///
-/// The host is hardcoded until `config.rs` and pairing land.
-pub async fn run(cmd: Vec<String>) -> anyhow::Result<i32> {
+use crate::config::Config;
+use crate::ssh::RemoteCommand;
+
+/// Run `cmd` on the Agent and return its exit code. A non zero code is not an
+/// error: borrow did its job, and the command it ran happened to fail.
+pub async fn run(agent: Option<String>, cmd: Vec<String>) -> anyhow::Result<i32> {
     let Some((program, args)) = cmd.split_first() else {
-        anyhow::bail!("No Command Given");
+        anyhow::bail!("no command given. try borrow run echo hello");
     };
 
-    let remote = ssh::RemoteCommand {
-        host: "archbox".to_string(),
-        program: program.clone(),
-        args: args.to_vec(),
-        cwd: None,
-        env: Vec::new(),
-    };
+    let config = Config::load()?;
+    let target = config.resolve(agent.as_deref())?;
 
-    eprintln!("▶ running on {}", remote.host);
+    let remote = RemoteCommand::to(target, program.clone(), args.to_vec());
+
+    eprintln!("▶ running on {}", target.name);
 
     remote.execute().await
 }
