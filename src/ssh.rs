@@ -14,12 +14,14 @@ const EXIT_SIGNALLED: i32 = 130;
 
 /// Options passed to every ssh call. BatchMode fails loudly rather than quietly
 /// asking for a password. The alive settings keep a long build from dying on an
-/// idle connection.
+/// idle connection. LogLevel hides ssh's own chatter, such as the closing notice
+/// after every command, while leaving real failures visible.
 const SSH_OPTIONS: &[&str] = &[
     "BatchMode=yes",
     "ConnectTimeout=10",
     "ServerAliveInterval=30",
     "ServerAliveCountMax=6",
+    "LogLevel=ERROR",
 ];
 
 /// Whether to ask ssh for a terminal on the box.
@@ -249,6 +251,15 @@ mod tests {
 
     /// ssh splits this option on whitespace because it can name several files.
     /// Without quotes a directory containing a space makes the box look unknown.
+    /// ssh narrates its own lifecycle at INFO, which would put a closing notice
+    /// after every single command. Errors stay visible at ERROR.
+    #[test]
+    fn ssh_is_told_to_keep_quiet_about_itself() {
+        let argv = remote(&["hi"]).to_ssh_args();
+
+        assert!(argv.contains(&"LogLevel=ERROR".to_string()), "argv was: {argv:?}");
+    }
+
     #[test]
     fn a_terminal_is_requested_only_when_asked_for() {
         assert!(!remote(&["hi"]).to_ssh_args().contains(&"-t".to_string()));
