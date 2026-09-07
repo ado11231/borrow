@@ -1,7 +1,9 @@
 //! Building and running commands on the Agent over ssh.
 
+use crate::config;
 use anyhow::Context;
 use shell_words::join;
+use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -10,26 +12,124 @@ use tokio::process::Command;
 /// exiting on its own. 130 is the shell convention for "terminated by SIGINT".
 const EXIT_SIGNALLED: i32 = 130;
 
+/// Options passed to every ssh call. BatchMode makes a missing or rejected key fail
+/// loudly instead of quietly falling back to asking for a password, which is the
+/// kind of thing you want to find out about immediately. The alive settings stop a
+/// long build from dying silently on an idle connection.
+const SSH_OPTIONS: &[&str] = &[
+    "BatchMode=yes",
+    "ConnectTimeout=10",
+    "ServerAliveInterval=30",
+    "ServerAliveCountMax=6",
+];
+
+/// Whether to ask ssh for a terminal on the box.
+///
+/// A terminal is what makes ctrl-c actually stop the remote command: it gives that
+/// command a session, so dropping the connection hangs it up instead of leaving it
+/// running. The cost is that a terminal is one stream, so the box's stdout and
+/// stderr arrive merged and lines end in \r\n.
+///
+/// So ask for one only when a person is sat at the keyboard, meaning input and
+/// output are both terminals. The moment output is going to a file or a pipe, keep
+/// the clean separate streams that scripts need.
+fn wants_terminal() -> bool {
+    use std::io::IsTerminal;
+
+    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
+}
+
 /// A command to run on the Agent. `cwd` and `env` are unused for now; they will carry
 /// the mounted project path and the artifact split variables in Phase 2.
 pub struct RemoteCommand {
     pub host: String,
+    pub user: Option<String>,
+    pub port: Option<u16>,
+    pub identity_file: Option<PathBuf>,
+    pub known_hosts: Option<PathBuf>,
+    /// Whether to ask for a terminal on the box. See `wants_terminal`.
+    pub tty: bool,
     pub program: String,
     pub args: Vec<String>,
+    #[allow(dead_code)]
     pub cwd: Option<String>,
+    #[allow(dead_code)]
     pub env: Vec<(String, String)>,
 }
 
-/// The arguments to pass to `ssh`: the host, then one command string. Each piece is
-/// quoted first, so spaces stay inside their argument and characters and reach the remote shell as literal text.
 impl RemoteCommand {
-    pub fn to_ssh_args(&self) -> Vec<String> {
-        let command = join(
-            std::iter::once(self.program.as_str())
-                .chain(self.args.iter().map(|s| s.as_str()))
-        );
+    /// Build a command aimed at a saved box. Everything ssh needs comes from the
+    /// config, so nobody has to keep an entry in `~/.ssh/config` in step with this.
+    pub fn to(agent: &config::Agent, program: String, args: Vec<String>) -> RemoteCommand {
+        RemoteCommand {
+            host: agent.host.clone(),
+            user: Some(agent.user.clone()),
+            port: agent.port,
+            identity_file: agent.identity_file.clone(),
+            known_hosts: agent.known_hosts.clone(),
+            tty: wants_terminal(),
+            program,
+            args,
+            cwd: None,
+            env: Vec::new(),
+        }
+    }
 
-        vec![self.host.clone(), command]
+    /// Who to log in as and where, in the form ssh expects.
+    fn destination(&self) -> String {
+        match &self.user {
+            Some(user) => format!("{user}@{}", self.host),
+            None => self.host.clone(),
+        }
+    }
+
+    /// The single string the remote shell will parse. Every piece is quoted first,
+    /// so spaces stay inside their argument and characters like `$` and `;` arrive
+    /// as literal text instead of being run.
+    pub fn command_line(&self) -> String {
+        join(
+            std::iter::once(self.program.as_str())
+                .chain(self.args.iter().map(|s| s.as_str())),
+        )
+    }
+
+    /// The full argument list for `ssh`. Options first, then the destination, then
+    /// the command, because ssh treats everything after the destination as payload.
+    pub fn to_ssh_args(&self) -> Vec<String> {
+        let mut argv = Vec::new();
+
+        for option in SSH_OPTIONS {
+            argv.push("-o".to_string());
+            argv.push(option.to_string());
+        }
+
+        if let Some(port) = self.port {
+            argv.push("-p".to_string());
+            argv.push(port.to_string());
+        }
+
+        if let Some(key) = &self.identity_file {
+            argv.push("-i".to_string());
+            argv.push(key.display().to_string());
+            argv.push("-o".to_string());
+            argv.push("IdentitiesOnly=yes".to_string());
+        }
+
+        if let Some(known_hosts) = &self.known_hosts {
+            argv.push("-o".to_string());
+            argv.push(format!("UserKnownHostsFile=\"{}\"", known_hosts.display()));
+            argv.push("-o".to_string());
+            argv.push("StrictHostKeyChecking=yes".to_string());
+        }
+
+        if self.tty {
+            argv.push("-t".to_string());
+        }
+
+        argv.push(self.destination());
+        argv.push(self.command_line());
+
+        argv
     }
 
     /// Spawn `ssh`, stream both output pipes to this terminal as they produce lines, and
@@ -86,17 +186,24 @@ impl RemoteCommand {
 mod tests {
     use super::*;
     
-    fn cmd(args: &[&str]) -> String {
-    RemoteCommand {
-        host: "localbox".to_string(),
-        program: "echo".to_string(),
-        args: args.iter().map(|s| s.to_string()).collect(),
-        cwd: None,
-        env: Vec::new(),
+    fn remote(args: &[&str]) -> RemoteCommand {
+        RemoteCommand {
+            host: "localbox".to_string(),
+            user: None,
+            port: None,
+            identity_file: None,
+            known_hosts: None,
+            tty: false,
+            program: "echo".to_string(),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            cwd: None,
+            env: Vec::new(),
+        }
     }
-    .to_ssh_args()[1]
-    .clone()
-}
+
+    fn cmd(args: &[&str]) -> String {
+        remote(args).command_line()
+    }
 
     #[test]
     fn quotes_nothing_when_unnecessary() {
@@ -121,5 +228,68 @@ mod tests {
     #[test]
     fn semicolon_stays_literal() {
         assert_eq!(cmd(&["a; whoami"]), "echo 'a; whoami'");
+    }
+
+    #[test]
+    fn the_command_is_the_last_argument() {
+        let argv = remote(&["hi"]).to_ssh_args();
+
+        assert_eq!(argv.last().unwrap(), "echo hi");
+        assert_eq!(argv[argv.len() - 2], "localbox");
+    }
+
+    #[test]
+    fn user_port_and_key_reach_ssh() {
+        let mut command = remote(&["hi"]);
+        command.user = Some("me".to_string());
+        command.port = Some(2222);
+        command.identity_file = Some(PathBuf::from("/keys/borrow"));
+        command.known_hosts = Some(PathBuf::from("/keys/known_hosts"));
+
+        let argv = command.to_ssh_args();
+
+        assert!(argv.contains(&"me@localbox".to_string()), "argv was: {argv:?}");
+        assert!(argv.windows(2).any(|w| w == ["-p", "2222"]), "argv was: {argv:?}");
+        assert!(argv.windows(2).any(|w| w == ["-i", "/keys/borrow"]), "argv was: {argv:?}");
+        assert!(
+            argv.contains(&"UserKnownHostsFile=\"/keys/known_hosts\"".to_string()),
+            "argv was: {argv:?}"
+        );
+    }
+
+    /// ssh splits this option's value on whitespace, because it can name several
+    /// files. Without quotes, a config directory containing a space silently
+    /// becomes two paths and the box looks unknown.
+    #[test]
+    fn a_terminal_is_requested_only_when_asked_for() {
+        assert!(!remote(&["hi"]).to_ssh_args().contains(&"-t".to_string()));
+
+        let mut interactive = remote(&["hi"]);
+        interactive.tty = true;
+
+        let argv = interactive.to_ssh_args();
+
+        assert!(argv.contains(&"-t".to_string()), "argv was: {argv:?}");
+        assert_eq!(argv.last().unwrap(), "echo hi");
+    }
+
+    #[test]
+    fn a_known_hosts_path_with_a_space_stays_one_path() {
+        let mut command = remote(&["hi"]);
+        command.known_hosts = Some(PathBuf::from("/App Support/known_hosts"));
+
+        let argv = command.to_ssh_args();
+
+        assert!(
+            argv.contains(&"UserKnownHostsFile=\"/App Support/known_hosts\"".to_string()),
+            "argv was: {argv:?}"
+        );
+    }
+
+    #[test]
+    fn no_key_configured_means_no_i_flag() {
+        let argv = remote(&["hi"]).to_ssh_args();
+
+        assert!(!argv.contains(&"-i".to_string()), "argv was: {argv:?}");
     }
 }
