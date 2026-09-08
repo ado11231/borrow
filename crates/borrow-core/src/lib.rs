@@ -7,4 +7,5 @@ pub mod config;
 pub mod keys;
 pub mod preflight;
 pub mod protocol;
+pub mod stack;
 pub mod telemetry;
