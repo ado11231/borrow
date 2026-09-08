@@ -13,7 +13,7 @@ use clap::{Parser, Subcommand};
 /// `--agent` lives up here rather than on `run`, because `run` swallows everything
 /// after it so the remote command can have flags of its own.
 #[derive(Parser)]
-#[command(version, about = "Run heavy work on another machine")]
+#[command(name = "borrow", version, about = "Run heavy work on another machine", long_about = None)]
 struct Cli {
     /// Which box to use. Defaults to the only one, or the one marked default.
     #[arg(long, short, global = true)]
