@@ -1,6 +1,6 @@
 //! Building and running commands on the Agent over ssh.
 
-use crate::config;
+use borrow_core::config;
 use anyhow::Context;
 use shell_words::join;
 use std::path::PathBuf;

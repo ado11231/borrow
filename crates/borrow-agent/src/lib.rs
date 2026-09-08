@@ -3,10 +3,10 @@
 //! It answers questions about the box and hands out one key at pairing time. It
 //! never runs your work: commands travel over ssh instead.
 
-use crate::keys::marker;
-use crate::preflight;
-use crate::protocol::{Paired, Request, Response};
-use crate::telemetry;
+use borrow_core::keys::marker;
+use borrow_core::preflight;
+use borrow_core::protocol::{Paired, Request, Response};
+use borrow_core::telemetry;
 use anyhow::Context;
 use directories::BaseDirs;
 use std::fs;

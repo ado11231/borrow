@@ -3,8 +3,9 @@
 //! borrow keeps its own key rather than reusing your personal one, so the key on a
 //! box is clearly borrow's and `unlink` can take it back out.
 
-use crate::config;
 use anyhow::Context;
+use borrow_core::config;
+use borrow_core::keys::marker;
 use directories::BaseDirs;
 use std::fs;
 use std::path::PathBuf;
@@ -24,12 +25,6 @@ fn ssh_dir() -> anyhow::Result<PathBuf> {
 /// Path to borrow's private key.
 pub fn private_key_path() -> anyhow::Result<PathBuf> {
     Ok(ssh_dir()?.join(KEY_NAME))
-}
-
-/// The comment written into the public key, which is also the marker `unlink`
-/// searches for when removing the key from a box later on.
-pub fn marker(client_name: &str) -> String {
-    format!("borrow:{client_name}")
 }
 
 /// Find borrow's key, creating it the first time. Generating one is announced with
@@ -143,8 +138,4 @@ mod tests {
         assert_eq!(host_pattern("10.0.0.9", Some(2222)), "[10.0.0.9]:2222");
     }
 
-    #[test]
-    fn the_marker_names_the_client() {
-        assert_eq!(marker("laptop"), "borrow:laptop");
-    }
 }

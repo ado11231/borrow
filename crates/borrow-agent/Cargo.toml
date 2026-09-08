@@ -1,0 +1,14 @@
+[package]
+name = "borrow-agent"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+borrow-core = { path = "../borrow-core" }
+anyhow = { workspace = true }
+directories = { workspace = true }
+rand = { workspace = true }
+serde_json = { workspace = true }
+sysinfo = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

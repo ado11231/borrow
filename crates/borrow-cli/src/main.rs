@@ -1,17 +1,12 @@
 //! borrow: run heavy work on another machine, from a light one.
 
-mod agent;
 mod client;
 mod commands;
-mod config;
 mod keys;
-mod preflight;
-mod protocol;
 mod ssh;
-mod telemetry;
 
+use borrow_core::protocol::DEFAULT_PORT;
 use clap::{Parser, Subcommand};
-use protocol::DEFAULT_PORT;
 
 /// The command line, described as a type. clap derives the parser and `--help` from it.
 ///
@@ -87,7 +82,7 @@ async fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Serve { name, port } => agent::serve(name, port).await,
+        Commands::Serve { name, port } => borrow_agent::serve(name, port).await,
         Commands::Link { code, name } => commands::link::link(code, name).await,
         Commands::Unlink => commands::unlink::unlink(cli.agent).await,
         Commands::Run { cmd } => commands::run::run(cli.agent, cmd).await,

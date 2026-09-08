@@ -1,6 +1,7 @@
 //! `borrow unlink`: take the key back off a box and forget it.
 
-use crate::config::Config;
+use borrow_core::config::Config;
+use borrow_core::keys::marker;
 use crate::keys;
 use crate::ssh::RemoteCommand;
 
@@ -10,17 +11,17 @@ use crate::ssh::RemoteCommand;
 pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
     let mut config = Config::load()?;
     let target = config.resolve(agent.as_deref())?.clone();
-    let marker = keys::marker(&this_machine());
+    let tag = marker(&this_machine());
 
     eprintln!("▶ removing borrow's key on {}", target.name);
 
-    let script = removal_script(&marker);
+    let script = removal_script(&tag);
     let remote = RemoteCommand::to(&target, "sh".to_string(), vec!["-c".to_string(), script]);
 
     match remote.execute().await {
         Ok(0) => eprintln!("✓ key removed from {}", target.name),
         Ok(_) | Err(_) => eprintln!(
-            "! could not reach {}, so the key is still there. remove the line ending {marker} from its ~/.ssh/authorized_keys by hand",
+            "! could not reach {}, so the key is still there. remove the line ending {tag} from its ~/.ssh/authorized_keys by hand",
             target.name
         ),
     }

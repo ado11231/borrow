@@ -1,8 +1,8 @@
 //! `borrow health`: what the box is doing right now.
 
 use crate::client;
-use crate::config::Config;
-use crate::protocol::{Health, Request, Response};
+use borrow_core::config::Config;
+use borrow_core::protocol::{Health, Request, Response};
 
 /// Ask the box for a live snapshot. Always fetched, never cached, because a cached
 /// answer to "is there room for this build" is worse than no answer at all.

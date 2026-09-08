@@ -74,21 +74,44 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
 
 [[package]]
-name = "borrow"
+name = "borrow-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap",
+ "borrow-core",
  "directories",
  "rand",
- "serde",
+ "serde_json",
+ "sysinfo",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "borrow-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "borrow-agent",
+ "borrow-core",
+ "clap",
+ "directories",
  "serde_json",
  "shell-words",
  "sysinfo",
  "tokio",
- "toml",
- "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "borrow-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "directories",
+ "serde",
+ "sysinfo",
+ "toml",
 ]
 
 [[package]]

@@ -1,10 +1,10 @@
 //! `borrow link <code>`: pair with a box and remember it.
 
 use crate::client;
-use crate::config::{Agent, Config};
+use borrow_core::config::{Agent, Config};
 use crate::keys;
-use crate::preflight::{self, Check};
-use crate::protocol::{Request, Response};
+use borrow_core::preflight::{self, Check};
+use borrow_core::protocol::{Request, Response};
 
 /// Take a pairing code, install this machine's key on the box, and save what it
 /// takes to reach it again. Every step says what it did.

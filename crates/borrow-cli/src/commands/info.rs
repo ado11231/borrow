@@ -1,8 +1,8 @@
 //! `borrow info`: what the box is.
 
 use crate::client;
-use crate::config::Config;
-use crate::protocol::{Request, Response, Specs};
+use borrow_core::config::Config;
+use borrow_core::protocol::{Request, Response, Specs};
 
 /// Print the box's static specs. These come from the cache saved at pairing, so the
 /// usual case is instant and works even when the box is asleep.

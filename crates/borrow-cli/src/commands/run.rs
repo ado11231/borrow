@@ -1,6 +1,6 @@
 //! `borrow run <cmd>`: run a command on the Agent.
 
-use crate::config::Config;
+use borrow_core::config::Config;
 use crate::ssh::RemoteCommand;
 
 /// Run `cmd` on the Agent and return its exit code. A non zero code is not an

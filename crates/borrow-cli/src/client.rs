@@ -4,7 +4,7 @@
 //! JSON. Small and boring on purpose: this is the control plane, and the real work
 //! travels over ssh instead.
 
-use crate::protocol::{Request, Response};
+use borrow_core::protocol::{Request, Response};
 use anyhow::Context;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;

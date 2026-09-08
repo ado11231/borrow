@@ -1,18 +1,19 @@
-[package]
-name = "borrow"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = ["crates/*"]
+resolver = "3"
 
-[dependencies]
-clap = { version = "4.6.6", features = ["derive"] }
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "process", "io-util", "signal", "net", "time", "sync"] }
+# Versions live here so every crate builds against the same ones. Two crates
+# pinning tokio separately would quietly compile two runtimes into the binary.
+[workspace.dependencies]
 anyhow = "1.0.104"
-shell-words = "1.1.0"
+clap = { version = "4.6.6", features = ["derive"] }
 directories = "6.0.0"
-serde = { version = "1.0.229", features = ["derive"] }
-toml = "1.1.5"
-serde_json = "1.0.151"
-sysinfo = "0.39.6"
 rand = "0.10.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+shell-words = "1.1.0"
+sysinfo = "0.39.6"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "process", "io-util", "signal", "net", "time", "sync"] }
+toml = "1.1.5"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
