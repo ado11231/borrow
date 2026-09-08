@@ -305,31 +305,100 @@ fn local_ip_towards(target: &str) -> Option<IpAddr> {
     }
 }
 
+/// A label for an address, so somebody reading two pairing codes can tell which
+/// one reaches them. Derived from the address itself rather than from how it was
+/// found, because a box routing everything over a VPN would otherwise mislabel it.
+fn network_label(ip: IpAddr) -> &'static str {
+    let IpAddr::V4(v4) = ip else {
+        return "network";
+    };
+
+    let [first, second, ..] = v4.octets();
+
+    match () {
+        _ if v4.is_loopback() => "this machine",
+        _ if first == 100 && (64..128).contains(&second) => "tailscale",
+        _ if v4.is_private() => "local network",
+        _ => "network",
+    }
+}
+
 /// Print the pairing code once, to the owner's own console. It is never written to
 /// a file and never logged, because whoever holds it can install a key.
+///
+/// Every address gets its own code rather than one code plus a footnote, because a
+/// code you cannot paste is not a code.
 fn announce(name: &str, addresses: &[SocketAddr], token: &str) {
-    let reachable: Vec<&SocketAddr> = addresses.iter().filter(|a| !a.ip().is_loopback()).collect();
-    let best = reachable.first().copied().or_else(|| addresses.first());
+    let reachable: Vec<&SocketAddr> =
+        addresses.iter().filter(|a| !a.ip().is_loopback()).collect();
+
+    let offered = match reachable.is_empty() {
+        true => addresses.iter().collect(),
+        false => reachable,
+    };
 
     eprintln!();
     eprintln!("borrow is serving {name}");
+    eprintln!();
 
-    match best {
-        Some(addr) => {
-            eprintln!();
-            eprintln!("  on the other machine, run:");
-            eprintln!();
-            eprintln!("      borrow link {}:{}:{token}", addr.ip(), addr.port());
-            eprintln!();
-        }
-        None => eprintln!("  no address to pair on"),
+    if offered.is_empty() {
+        eprintln!("  no address to pair on");
+        return;
     }
 
-    for addr in reachable.iter().skip(1) {
-        eprintln!("  also reachable at {}:{}", addr.ip(), addr.port());
+    match offered.len() {
+        1 => eprintln!("  on the other machine, run:"),
+        _ => eprintln!("  on the other machine, run whichever reaches this box:"),
     }
 
+    eprintln!();
+
+    let commands: Vec<(String, &str)> = offered
+        .iter()
+        .map(|addr| {
+            (
+                format!("borrow link {}:{}:{token}", addr.ip(), addr.port()),
+                network_label(addr.ip()),
+            )
+        })
+        .collect();
+
+    let width = commands.iter().map(|(c, _)| c.len()).max().unwrap_or(0);
+
+    for (command, label) in &commands {
+        eprintln!("      {command:<width$}   ({label})");
+    }
+
+    eprintln!();
     eprintln!("  the code works once and expires in {} minutes", CODE_LIFETIME.as_secs() / 60);
     eprintln!("  ctrl-c to stop");
     eprintln!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_tailnet_address_is_named() {
+        assert_eq!(network_label("100.67.90.119".parse().unwrap()), "tailscale");
+    }
+
+    #[test]
+    fn a_home_network_address_is_named() {
+        assert_eq!(network_label("10.0.0.193".parse().unwrap()), "local network");
+        assert_eq!(network_label("192.168.1.7".parse().unwrap()), "local network");
+    }
+
+    /// 100.x is only a tailnet address inside the carrier grade NAT range. A public
+    /// address that merely starts with 100 must not be mistaken for one.
+    #[test]
+    fn a_public_hundred_address_is_not_tailscale() {
+        assert_eq!(network_label("100.20.0.1".parse().unwrap()), "network");
+    }
+
+    #[test]
+    fn loopback_is_named_as_this_machine() {
+        assert_eq!(network_label("127.0.0.1".parse().unwrap()), "this machine");
+    }
 }
