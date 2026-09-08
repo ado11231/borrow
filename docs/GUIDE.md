@@ -529,25 +529,30 @@ guess about code that has not been written yet. One crate lets you find the real
 first. By Phase 2 they are obvious, because the protocol types and the mount logic will
 visibly be used by both sides.
 
-### Today: one crate
+### Today: three crates, one binary
+
+Done as the first task of Phase 2.
 
 ```
 borrow/
-├── Cargo.toml
-├── README.md
-├── CLAUDE.md
-├── docs/
-│   └── GUIDE.md
-└── src/
-    ├── main.rs          # clap definitions and dispatch
-    ├── ssh.rs           # RemoteCommand, quoting, and its tests
-    └── commands/
-        ├── mod.rs
-        └── run.rs       # the run subcommand
+├── Cargo.toml               # workspace root: member list and shared versions
+└── crates/
+    ├── borrow-core/src/     # lib.rs, protocol, config, telemetry, preflight, keys
+    ├── borrow-agent/src/    # lib.rs, the daemon
+    └── borrow-cli/src/      # main.rs, ssh, client, keys, commands/
 ```
 
-By the end of Phase 1 this same crate also holds `config.rs`, `protocol.rs`,
-`telemetry.rs`, `agent.rs`, and the `link`, `info`, and `health` command modules.
+**Three crates, but still one binary, and that is deliberate.** `borrow-core` and
+`borrow-agent` are libraries. `borrow-cli` is the only package that produces an executable,
+and `[[bin]] name = "borrow"` is what keeps `borrow serve` and `borrow run` working as
+documented.
+
+The benefit being bought here is the **crate boundary**, not separate executables. A
+boundary is what makes the compiler refuse a cycle, so `borrow-agent` can never reach into
+`borrow-cli`. That enforcement is identical whether the result is one binary or two.
+Splitting the executables is a distribution decision, and it can wait for Phase 7 when the
+installer and the systemd unit are being written. Splitting the crates is an architecture
+decision, and it only gets more expensive with time.
 
 One binary behaves as Client or as Agent depending on the subcommand you give it. This is
 also why the tool stays platform generic almost for free, since it is the same binary on
@@ -577,9 +582,9 @@ borrow/
 │   │       ├── main.rs
 │   │       └── commands/       # link, run, attach, ps, stop, info, health, top
 │   │
-│   ├── borrow-agent/           # the daemon on the Agent
+│   ├── borrow-agent/           # the daemon on the Agent, a library today
 │   │   └── src/
-│   │       ├── main.rs         # borrow serve, runs as a systemd service
+│   │       ├── lib.rs          # borrow serve, called by the cli binary
 │   │       ├── executor.rs     # receives commands, runs them, streams output
 │   │       ├── sessions.rs     # warm sessions surviving disconnects
 │   │       ├── mounts.rs       # sets up the incoming mount

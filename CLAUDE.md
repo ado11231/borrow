@@ -103,20 +103,24 @@ detail is in `docs/GUIDE.md`.
 
 ## Repo layout
 
-**Today the repo is a single crate**, meaning `src/main.rs` plus modules. The workspace
-split below is the first task of Phase 2, now that the shared seams are visible: a second
-binary exists, so "do both sides use this?" is a question you can answer by looking rather
-than by guessing.
+**The workspace split is done**, as the first task of Phase 2.
 
-Current modules and where each one lands after the split:
+```
+crates/
+├── borrow-core/     lib: protocol, config, telemetry, preflight, keys::marker
+├── borrow-agent/    lib: the daemon
+└── borrow-cli/      bin `borrow`: ssh, client, keys, commands/
+```
 
-| Module | Goes to | Why |
-| --- | --- | --- |
-| `protocol.rs`, `telemetry.rs` | `borrow-core` | both binaries use these types |
-| `config.rs` | splits | the Client's box list is not the daemon's own settings |
-| `ssh.rs`, `commands/` | `borrow-cli` | only the Client spawns ssh |
-| `agent.rs` | `borrow-agent` | the daemon binary |
-| `keys.rs`, `preflight.rs`, `client.rs` | `borrow-cli`, mostly | preflight is needed by both, so watch it |
+**Three crates, one binary.** `borrow-core` and `borrow-agent` are libraries; `borrow-cli`
+produces the only executable, named `borrow` via `[[bin]]`. The point of the split is the
+crate boundary, which makes the compiler refuse a cycle, not separate executables. Splitting
+those is a Phase 7 distribution decision.
+
+Dependencies point one way only: `borrow-cli` uses both, `borrow-agent` uses core, and core
+uses nothing of ours. If the agent ever needs something from the cli, the thing belongs in
+core instead. That is how `keys::marker` ended up there, since both sides have to agree on
+how an installed key is labelled.
 
 **End state, from Phase 2 onward:**
 

@@ -94,9 +94,12 @@ use arrives in Phase 4. Until then both machines need to be on the same network.
 
 ```bash
 cargo build
-cargo run -- --help
 cargo test
+cargo install --path crates/borrow-cli    # puts `borrow` on your PATH
 ```
+
+The repo is a Cargo workspace: `borrow-core` and `borrow-agent` are libraries, and
+`borrow-cli` produces the single `borrow` binary that both machines install.
 
 Requires a Rust toolchain on both machines, and an ssh server on the Agent.
 
