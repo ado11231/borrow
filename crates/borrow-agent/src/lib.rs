@@ -3,16 +3,13 @@
 //! It answers questions about the box and hands out one key at pairing time. It
 //! never runs your work: commands travel over ssh instead.
 
-use borrow_core::keys::marker;
+use borrow_core::keys;
 use borrow_core::preflight;
 use borrow_core::protocol::{Paired, Request, Response};
 use borrow_core::telemetry;
 use anyhow::Context;
-use directories::BaseDirs;
 use std::fs;
-use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -28,6 +25,9 @@ const CODE_LIFETIME: Duration = Duration::from_secs(10 * 60);
 const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 const CODE_LENGTH: usize = 8;
+
+/// The private key this box uses to reach back to a Client for the mount.
+const MOUNT_KEY_NAME: &str = "borrow_mount_ed25519";
 
 /// The one time token that lets a Client install its key. Single use: pairing
 /// consumes it, and there is no way to ask the daemon what it was.
@@ -100,7 +100,7 @@ async fn accept_loop(listener: TcpListener, agent: Arc<Agent>) {
             Ok((stream, peer)) => {
                 let agent = Arc::clone(&agent);
                 tokio::spawn(async move {
-                    if let Err(e) = handle(stream, agent).await {
+                    if let Err(e) = handle(stream, agent, peer.ip()).await {
                         warn!("request from {peer} failed: {e:#}");
                     }
                 });
@@ -112,12 +112,12 @@ async fn accept_loop(listener: TcpListener, agent: Arc<Agent>) {
 
 /// Read one request, write one response. Anything that goes wrong comes back as an
 /// Error response rather than a dropped connection, so the Client can explain it.
-async fn handle(mut stream: TcpStream, agent: Arc<Agent>) -> anyhow::Result<()> {
+async fn handle(mut stream: TcpStream, agent: Arc<Agent>, peer: IpAddr) -> anyhow::Result<()> {
     let mut line = String::new();
     BufReader::new(&mut stream).read_line(&mut line).await?;
 
     let response = match serde_json::from_str::<Request>(line.trim()) {
-        Ok(request) => answer(request, &agent),
+        Ok(request) => answer(request, &agent, peer),
         Err(e) => Response::Error { message: format!("could not understand that request: {e}") },
     };
 
@@ -128,17 +128,27 @@ async fn handle(mut stream: TcpStream, agent: Arc<Agent>) -> anyhow::Result<()> 
     Ok(())
 }
 
-fn answer(request: Request, agent: &Agent) -> Response {
+fn answer(request: Request, agent: &Agent, peer: IpAddr) -> Response {
     match request {
         Request::Info => Response::Info(telemetry::specs(&agent.name)),
         Request::Health => Response::Health(telemetry::health()),
-        Request::Pair { token, client, public_key } => pair(agent, &token, &client, &public_key),
+        Request::Pair { token, client, public_key, user, host_keys } => {
+            pair(agent, &token, &Client { name: client, public_key, user, host_keys }, peer)
+        }
     }
 }
 
 /// Trade a valid token for an installed key. The token is taken out of the daemon
 /// before the key is written, so two Clients racing cannot both pair.
-fn pair(agent: &Agent, token: &str, client: &str, public_key: &str) -> Response {
+/// What the Client told us about itself at pairing.
+struct Client {
+    name: String,
+    public_key: String,
+    user: String,
+    host_keys: Vec<String>,
+}
+
+fn pair(agent: &Agent, token: &str, client: &Client, peer: IpAddr) -> Response {
     let claimed = {
         let mut slot = agent.pairing.lock().expect("pairing lock was poisoned");
 
@@ -161,100 +171,77 @@ fn pair(agent: &Agent, token: &str, client: &str, public_key: &str) -> Response 
             message: "that pairing code has expired or was already used; run borrow serve again for a fresh one".to_string(),
         },
         Some(false) => Response::Error { message: "that pairing code is not right".to_string() },
-        Some(true) => match install_key(client, public_key) {
-            Ok(path) => {
-                info!("paired with {client}");
-                eprintln!("✓ paired with {client}, key added to {}", path.display());
-
-                Response::Paired(Paired {
-                    name: agent.name.clone(),
-                    user: agent.user.clone(),
-                    host_keys: host_keys(),
-                    specs: telemetry::specs(&agent.name),
-                })
-            }
-            Err(e) => Response::Error { message: format!("could not install the key: {e:#}") },
+        Some(true) => match accept(agent, client, peer) {
+            Ok(paired) => Response::Paired(paired),
+            Err(e) => Response::Error { message: format!("could not finish pairing: {e:#}") },
         },
     }
 }
 
-/// Add the Client's public key to authorized_keys, replacing any older key from the
-/// same Client. The file is rewritten whole, because appending to one with no
-/// trailing newline joins two keys into a broken line and locks you out.
-fn install_key(client: &str, public_key: &str) -> anyhow::Result<PathBuf> {
-    let key = public_key.trim();
+/// Set up both directions of trust and describe the result.
+///
+/// Two independent one way trusts are established here and neither private key
+/// moves. The Client gets to run commands on this box, and this box gets to reach
+/// back for the mount. The second half is the new part in Phase 2, and it is why
+/// the Client sends its own identity in the pairing request.
+fn accept(agent: &Agent, client: &Client, peer: IpAddr) -> anyhow::Result<Paired> {
+    let authorized = keys::authorize(&client.name, &client.public_key)
+        .context("could not add the Client's key to authorized_keys")?;
 
-    if !key.starts_with("ssh-") && !key.starts_with("ecdsa-") {
-        anyhow::bail!("that does not look like an ssh public key");
-    }
+    let known_hosts = keys::learn_host(&peer.to_string(), None, &client.host_keys)
+        .context("could not record the Client's host keys")?;
 
-    let Some(base) = BaseDirs::new() else {
-        anyhow::bail!("could not determine home directory");
-    };
+    let (identity_file, mount_key) =
+        mount_key().context("could not prepare this box's key for the mount")?;
 
-    let dir = base.home_dir().join(".ssh");
-    fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
-    set_mode(&dir, 0o700)?;
+    info!("paired with {}", client.name);
+    eprintln!("✓ paired with {}", client.name);
+    eprintln!("  authorized {}", authorized.display());
+    eprintln!("  mount key  {}", identity_file.display());
+    eprintln!("  will mount from {}@{}", client.user, peer);
 
-    let file = dir.join("authorized_keys");
-    let existing = fs::read_to_string(&file).unwrap_or_default();
-    let tag = marker(client);
-
-    let mut lines: Vec<&str> = existing
-        .lines()
-        .filter(|line| !line.trim().is_empty() && !line.ends_with(&tag))
-        .collect();
-
-    lines.push(key);
-
-    let mut body = lines.join("\n");
-    body.push('\n');
-
-    let mut handle = fs::File::create(&file)
-        .with_context(|| format!("could not write {}", file.display()))?;
-    handle.write_all(body.as_bytes())?;
-    set_mode(&file, 0o600)?;
-
-    Ok(file)
+    Ok(Paired {
+        name: agent.name.clone(),
+        user: agent.user.clone(),
+        host_keys: keys::host_keys(),
+        mount_key,
+        mount_identity_file: identity_file.display().to_string(),
+        mount_known_hosts: known_hosts.display().to_string(),
+        client_address: peer.to_string(),
+        specs: telemetry::specs(&agent.name),
+    })
 }
 
-/// Lock a file down to its owner. ssh refuses to use keys and authorized_keys files
-/// that anybody else can read, so this is required rather than tidy.
-fn set_mode(path: &std::path::Path, mode: u32) -> anyhow::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(mode))
-            .with_context(|| format!("could not set permissions on {}", path.display()))?;
+/// The key this box uses to pull the mount, made once and kept.
+///
+/// It is a separate key from anything the user owns, with no passphrase, because
+/// the mount has to come up without a human present to unlock an agent. Keeping it
+/// distinct is also what makes it revocable: it appears in the Client's
+/// authorized_keys under borrow's own marker and nowhere else.
+fn mount_key() -> anyhow::Result<(std::path::PathBuf, String)> {
+    let private = keys::ssh_dir()?.join(MOUNT_KEY_NAME);
+    let public = private.with_extension("pub");
+
+    if !public.exists() {
+        fs::create_dir_all(keys::ssh_dir()?)?;
+        keys::set_mode(&keys::ssh_dir()?, 0o700)?;
+
+        eprintln!("generating a mount key at {}", private.display());
+
+        let status = std::process::Command::new("ssh-keygen")
+            .args(["-t", "ed25519", "-N", "", "-q", "-C", &keys::marker("mount"), "-f"])
+            .arg(&private)
+            .status()
+            .context("could not run ssh-keygen")?;
+
+        if !status.success() {
+            anyhow::bail!("ssh-keygen failed while creating {}", private.display());
+        }
     }
 
-    let _ = (path, mode);
-    Ok(())
-}
+    let text = fs::read_to_string(&public)?;
 
-/// This box's ssh host keys, read from where sshd publishes them. Sending these at
-/// pairing lets the Client trust the box on its first connection.
-fn host_keys() -> Vec<String> {
-    let Ok(entries) = fs::read_dir("/etc/ssh") else {
-        return Vec::new();
-    };
-
-    let mut keys: Vec<String> = entries
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| {
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-                return false;
-            };
-            name.starts_with("ssh_host_") && name.ends_with("_key.pub")
-        })
-        .filter_map(|path| fs::read_to_string(path).ok())
-        .map(|text| text.trim().to_string())
-        .filter(|text| !text.is_empty())
-        .collect();
-
-    keys.sort();
-    keys
+    Ok((private, text.trim().to_string()))
 }
 
 /// A fresh pairing code. Uses the operating system's randomness, so a code cannot be

@@ -3,6 +3,7 @@
 use crate::client;
 use borrow_core::config::{Agent, Config};
 use crate::keys;
+use borrow_core::keys as core_keys;
 use borrow_core::preflight::{self, Check};
 use borrow_core::protocol::{Request, Response};
 
@@ -20,10 +21,7 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
                 "run borrow serve on the other machine".to_string(),
             ),
         },
-        match preflight::is_listening(([127, 0, 0, 1], 22).into()) {
-            true => Check::pass("ssh server running here"),
-            false => Check::warn("no ssh server here yet", "needed in phase 2 to mount your files"),
-        },
+        preflight::ssh_server_check(),
     ];
 
     if preflight::report(&checks) {
@@ -35,7 +33,13 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
     let response = client::request(
         &host,
         port,
-        Request::Pair { token, client: client_name.clone(), public_key },
+        Request::Pair {
+            token,
+            client: client_name.clone(),
+            public_key,
+            user: this_user(),
+            host_keys: core_keys::host_keys(),
+        },
     )
     .await?;
 
@@ -43,8 +47,9 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
         anyhow::bail!("the box answered something unexpected while pairing");
     };
 
-    let name = name.unwrap_or(paired.name);
-    let known_hosts = keys::learn_host(&host, None, &paired.host_keys)?;
+    let name = name.unwrap_or(paired.name.clone());
+    let known_hosts = core_keys::learn_host(&host, None, &paired.host_keys)?;
+    let authorized = core_keys::authorize(&name, &paired.mount_key)?;
 
     let mut config = Config::load_or_empty()?;
     config.upsert(Agent {
@@ -55,6 +60,10 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
         daemon_port: Some(port),
         identity_file: Some(private_key.clone()),
         known_hosts: Some(known_hosts.clone()),
+        mount_user: Some(this_user()),
+        mount_host: Some(paired.client_address.clone()),
+        mount_identity_file: Some(paired.mount_identity_file.clone()),
+        mount_known_hosts: Some(paired.mount_known_hosts.clone()),
         specs: Some(paired.specs),
     });
 
@@ -66,6 +75,10 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
     eprintln!("  installed {}@{}:~/.ssh/authorized_keys", paired.user, host);
     eprintln!("  host keys {} ({} learned)", known_hosts.display(), paired.host_keys.len());
     eprintln!("  saved     {}", saved.display());
+    eprintln!();
+    eprintln!("  and back the other way, so {name} can mount your files:");
+    eprintln!("  authorized {}", authorized.display());
+    eprintln!("  mounts from {}@{}", this_user(), paired.client_address);
     eprintln!();
     eprintln!("  try it:   borrow run uname -a");
     eprintln!();
@@ -87,6 +100,13 @@ fn parse_code(code: &str) -> anyhow::Result<(String, u16, String)> {
         .map_err(|_| anyhow::anyhow!("'{port}' is not a port number"))?;
 
     Ok((host.to_string(), port, token.to_string()))
+}
+
+/// The account on this machine the Agent will log in as to pull the mount.
+fn this_user() -> String {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
+        .unwrap_or_else(|_| "unknown".to_string())
 }
 
 /// A name for this machine, used to label the key installed on the box so a human

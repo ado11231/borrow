@@ -18,10 +18,17 @@ pub enum Request {
     /// What the box is doing right now.
     Health,
     /// Trade a pairing token for an installed key. Single use.
+    ///
+    /// The Client sends its own ssh identity too, because the mount runs in the
+    /// opposite direction and the Agent has to be able to dial back. `user` is the
+    /// account the Agent will log in as, and `host_keys` let it recognise the
+    /// Client without anybody comparing a fingerprint by hand.
     Pair {
         token: String,
         client: String,
         public_key: String,
+        user: String,
+        host_keys: Vec<String>,
     },
 }
 
@@ -46,6 +53,16 @@ pub struct Paired {
     /// The box's ssh host keys, so the Client can recognise it later without
     /// anybody being asked to eyeball a fingerprint.
     pub host_keys: Vec<String>,
+    /// The Agent's own public key, for the return direction. The Client installs
+    /// this so the Agent can pull the mount. Neither private key ever moves.
+    pub mount_key: String,
+    /// Where the Agent keeps the private half and the hosts it trusts. Both paths
+    /// are on the Agent, so the Agent is the one that names them.
+    pub mount_identity_file: String,
+    pub mount_known_hosts: String,
+    /// The address the Client appeared to come from. Used as the mount source, so
+    /// the Agent dials back down the route it already knows works.
+    pub client_address: String,
     pub specs: Specs,
 }
 

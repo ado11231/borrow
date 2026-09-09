@@ -1,5 +1,6 @@
 //! Where the Client remembers which Agent to talk to.
 
+use crate::mount;
 use crate::protocol::{Specs, DEFAULT_PORT};
 use anyhow::Context;
 use directories::ProjectDirs;
@@ -40,6 +41,15 @@ pub struct Agent {
     pub identity_file: Option<PathBuf>,
     /// The file holding this box's ssh host keys, learned at pairing.
     pub known_hosts: Option<PathBuf>,
+    /// The account on **this** machine the Agent logs in as to pull the mount, and
+    /// the address it saw this machine arrive from. The mount runs in the opposite
+    /// direction to everything else, so it needs its own pair of coordinates.
+    pub mount_user: Option<String>,
+    pub mount_host: Option<String>,
+    /// Paths **on the Agent**: its mount key and the hosts it trusts. Reported by
+    /// the daemon at pairing, because the machine that owns a path should name it.
+    pub mount_identity_file: Option<String>,
+    pub mount_known_hosts: Option<String>,
     /// What the box is, fetched once at pairing so `info` is instant.
     pub specs: Option<Specs>,
 }
@@ -48,6 +58,25 @@ impl Agent {
     /// The daemon port to dial, falling back to the built in default.
     pub fn daemon_port(&self) -> u16 {
         self.daemon_port.unwrap_or(DEFAULT_PORT)
+    }
+
+    /// Where the Agent should pull a local directory from, and what it needs in
+    /// order to do so. `None` means this box was paired before the mount existed,
+    /// which is a thing `link` can fix rather than an error to explain.
+    pub fn mount_source(&self, path: &std::path::Path) -> Option<(mount::Source, mount::MountKeys)> {
+        let source = mount::Source {
+            user: self.mount_user.clone()?,
+            host: self.mount_host.clone()?,
+            port: None,
+            path: path.to_path_buf(),
+        };
+
+        let keys = mount::MountKeys {
+            identity_file: PathBuf::from(self.mount_identity_file.clone()?),
+            known_hosts: PathBuf::from(self.mount_known_hosts.clone()?),
+        };
+
+        Some((source, keys))
     }
 }
 
@@ -290,6 +319,10 @@ mod tests {
             daemon_port: None,
             identity_file: None,
             known_hosts: None,
+            mount_user: None,
+            mount_host: None,
+            mount_identity_file: None,
+            mount_known_hosts: None,
             specs: None,
         }
     }
@@ -366,5 +399,28 @@ mod tests {
         );
 
         assert!(result.is_err());
+    }
+
+    /// A box paired before Phase 2 has none of the return direction saved. Saying
+    /// so plainly is better than a mount that fails in the shell with no context.
+    #[test]
+    fn a_box_paired_before_the_mount_existed_has_no_source() {
+        assert!(agent("archbox").mount_source(std::path::Path::new("/Users/me/app")).is_none());
+    }
+
+    #[test]
+    fn a_paired_box_points_the_mount_back_at_this_machine() {
+        let mut agent = agent("archbox");
+        agent.mount_user = Some("me".to_string());
+        agent.mount_host = Some("100.64.0.2".to_string());
+        agent.mount_identity_file = Some("/home/ado/.ssh/borrow_mount_ed25519".to_string());
+        agent.mount_known_hosts = Some("/home/ado/.config/borrow/known_hosts".to_string());
+
+        let (source, keys) =
+            agent.mount_source(std::path::Path::new("/Users/me/app")).unwrap();
+
+        assert_eq!(source.host, "100.64.0.2");
+        assert_eq!(source.path, PathBuf::from("/Users/me/app"));
+        assert_eq!(keys.identity_file, PathBuf::from("/home/ado/.ssh/borrow_mount_ed25519"));
     }
 }
