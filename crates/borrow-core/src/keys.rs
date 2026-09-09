@@ -118,12 +118,14 @@ fn write_lines(file: &PathBuf, lines: &[String]) -> anyhow::Result<()> {
 /// Client so `run` works, and the Client authorises the Agent so the mount can be
 /// pulled. The file is rewritten whole, because appending to one with no trailing
 /// newline welds two keys into a single broken line and locks you out.
+///
+/// The comment is **replaced** rather than trusted. Whatever the other machine
+/// called its key, the line written here ends with the marker this machine will
+/// search for when revoking it. A key that cannot be found again cannot be taken
+/// back out, so the two must never be allowed to drift apart.
 pub fn authorize(peer: &str, public_key: &str) -> anyhow::Result<PathBuf> {
-    let key = public_key.trim();
-
-    if !key.starts_with("ssh-") && !key.starts_with("ecdsa-") {
-        anyhow::bail!("that does not look like an ssh public key");
-    }
+    let tag = marker(peer);
+    let key = authorized_line(peer, public_key)?;
 
     let dir = ssh_dir()?;
     fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
@@ -131,14 +133,13 @@ pub fn authorize(peer: &str, public_key: &str) -> anyhow::Result<PathBuf> {
 
     let file = dir.join("authorized_keys");
     let existing = fs::read_to_string(&file).unwrap_or_default();
-    let tag = marker(peer);
 
     let mut lines: Vec<&str> = existing
         .lines()
         .filter(|line| !line.trim().is_empty() && !line.ends_with(&tag))
         .collect();
 
-    lines.push(key);
+    lines.push(&key);
 
     let mut body = lines.join("\n");
     body.push('\n');
@@ -163,6 +164,16 @@ pub fn set_mode(path: &std::path::Path, mode: u32) -> anyhow::Result<()> {
 
     let _ = (path, mode);
     Ok(())
+}
+
+/// One authorized_keys line: the key itself, relabelled with our own marker.
+fn authorized_line(peer: &str, public_key: &str) -> anyhow::Result<String> {
+    match public_key.split_whitespace().collect::<Vec<&str>>().as_slice() {
+        [kind, material, ..] if kind.starts_with("ssh-") || kind.starts_with("ecdsa-") => {
+            Ok(format!("{kind} {material} {}", marker(peer)))
+        }
+        _ => anyhow::bail!("that does not look like an ssh public key"),
+    }
 }
 
 /// Take a key back out of authorized_keys. What makes `unlink` mean something.
@@ -214,5 +225,30 @@ mod tests {
     #[test]
     fn the_marker_names_the_client() {
         assert_eq!(marker("laptop"), "borrow:laptop");
+    }
+
+    /// The bug this guards against: the Agent names its mount key `borrow:mount`,
+    /// but the Client revokes it by the Agent's name. Written verbatim, the key
+    /// installs fine and then cannot ever be removed.
+    #[test]
+    fn an_authorized_line_ends_with_the_marker_used_to_revoke_it() {
+        let key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 borrow:mount";
+
+        let line = authorized_line("archbox", key).unwrap();
+
+        assert!(line.ends_with(&marker("archbox")), "line was: {line}");
+        assert!(line.starts_with("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5"), "line was: {line}");
+    }
+
+    #[test]
+    fn a_key_with_no_comment_still_gets_one() {
+        let line = authorized_line("archbox", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5").unwrap();
+
+        assert_eq!(line, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 borrow:archbox");
+    }
+
+    #[test]
+    fn something_that_is_not_a_key_is_refused() {
+        assert!(authorized_line("archbox", "hello there").is_err());
     }
 }
