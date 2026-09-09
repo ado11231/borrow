@@ -119,13 +119,41 @@ pub fn tool_check(program: &str, state_when_missing: State) -> Check {
     }
 }
 
-/// The checks `borrow serve` runs before it listens. sshfs and rsync are warnings
-/// rather than failures, because Phase 1 has no mount yet.
+/// Whether this account can create things in a directory borrow owns.
+///
+/// Both of borrow's directories live under root owned parents, so a stranger's
+/// first `serve` would otherwise fail deep inside a shell script with a bare
+/// permission error. Checked here instead, with the two commands that fix it.
+pub fn writable_check(path: &str, purpose: &str) -> Check {
+    let dir = std::path::Path::new(path);
+
+    let fix = format!("sudo mkdir -p {path} && sudo chown $(id -un) {path}");
+
+    if !dir.exists() {
+        return Check::fail(format!("{path} does not exist ({purpose})"), fix);
+    }
+
+    let probe = dir.join(".borrow-write-test");
+
+    match std::fs::write(&probe, b"") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            Check::pass(format!("{path} is writable"))
+        }
+        Err(_) => Check::fail(format!("{path} is not writable ({purpose})"), fix),
+    }
+}
+
+/// The checks `borrow serve` runs before it listens. sshfs is required from Phase 2
+/// onward, because without it there is no mount and the box can only run commands
+/// against files it cannot see. rsync stays a warning; nothing needs it yet.
 pub fn serve_checks() -> Vec<Check> {
     let mut checks = vec![
         ssh_server_check(),
-        tool_check("sshfs", State::Warn),
+        tool_check("sshfs", State::Fail),
         tool_check("rsync", State::Warn),
+        writable_check(crate::mount::MOUNT_BASE, "where your files appear"),
+        writable_check(crate::mount::ARTIFACT_BASE, "where build output goes"),
     ];
 
     checks.push(match is_installed("nvidia-smi") {

@@ -6,6 +6,7 @@
 //! one. Getting this wrong does not make borrow slower, it makes borrow pointless.
 
 use crate::stack::{Project, Stack};
+use shell_words::quote;
 use std::path::{Path, PathBuf};
 
 /// Where the Client's project is mounted on the Agent.
@@ -115,6 +116,117 @@ pub fn redirects(rules: &[Rule]) -> Vec<(&'static str, &Path)> {
             Rule::Env { .. } => None,
         })
         .collect()
+}
+
+/// Options handed to `sshfs`. `reconnect` plus the alive settings are what stop a
+/// laptop closing its lid from leaving a mount that hangs forever. `idmap=user`
+/// maps the Client's ownership onto the Agent's account, so files do not all
+/// arrive owned by somebody who does not exist on the other machine.
+const SSHFS_OPTIONS: &[&str] = &[
+    "reconnect",
+    "ServerAliveInterval=15",
+    "ServerAliveCountMax=3",
+    "BatchMode=yes",
+    "StrictHostKeyChecking=yes",
+    "idmap=user",
+    "follow_symlinks",
+];
+
+/// How long to wait before deciding a mount point is stale rather than slow. A dead
+/// SSHFS mount does not return an error, it blocks, so the only way to tell is to
+/// give it a deadline.
+const STALE_TIMEOUT_SECONDS: u32 = 5;
+
+/// Where the source actually lives, described the way the Agent has to dial it.
+/// This is the reverse direction from everything else borrow does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Source {
+    pub user: String,
+    pub host: String,
+    pub port: Option<u16>,
+    pub path: PathBuf,
+}
+
+/// The ssh material the Agent uses to reach back to the Client. Both paths are on
+/// the Agent, which is why they are reported by the daemon at pairing rather than
+/// being guessed by the Client.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MountKeys {
+    pub identity_file: PathBuf,
+    pub known_hosts: PathBuf,
+}
+
+/// Render a path the way a shell will read it as one word.
+fn shell(path: &Path) -> String {
+    quote(&path.display().to_string()).into_owned()
+}
+
+/// The `sshfs` invocation on its own, without the surrounding checks.
+fn sshfs(layout: &Layout, source: &Source, keys: &MountKeys) -> String {
+    let mut options: Vec<String> = SSHFS_OPTIONS.iter().map(|o| o.to_string()).collect();
+
+    options.push(format!("IdentityFile={}", keys.identity_file.display()));
+    options.push(format!("UserKnownHostsFile={}", keys.known_hosts.display()));
+
+    if let Some(port) = source.port {
+        options.push(format!("port={port}"));
+    }
+
+    let remote = format!("{}@{}:{}", source.user, source.host, source.path.display());
+
+    format!(
+        "sshfs -o {} {} {}",
+        quote(&options.join(",")),
+        quote(&remote),
+        shell(&layout.source)
+    )
+}
+
+/// The shell line that leaves the project mounted on the Agent, whatever state it
+/// was in beforehand.
+///
+/// Three cases have to be handled, and only the first is obvious. A missing mount
+/// gets made. An existing healthy mount is left alone, because remounting on every
+/// command would throw away the connection a build is about to use. A **stale**
+/// mount is the awkward one: it is still listed as mounted, but every access to it
+/// blocks forever rather than failing. Reaching it behind `timeout` is the only way
+/// to find out, and a mount that fails that test is forced off before remounting.
+pub fn ensure_mounted(layout: &Layout, source: &Source, keys: &MountKeys) -> String {
+    let mount = shell(&layout.source);
+
+    format!(
+        "mkdir -p {mount}; \
+         if mountpoint -q {mount} && ! timeout {STALE_TIMEOUT_SECONDS} ls {mount} >/dev/null 2>&1; \
+         then fusermount -u -z {mount} >/dev/null 2>&1 || true; fi; \
+         if ! mountpoint -q {mount}; then {sshfs}; fi"
+    , sshfs = sshfs(layout, source, keys))
+}
+
+/// The shell line that puts the artifact directories in place before anything runs.
+///
+/// A `Redirect` is only created when nothing is there already. That guard matters:
+/// the mount is the user's real project directory, so a careless `ln -s` would
+/// replace a `node_modules` they are still using on their own machine.
+pub fn prepare(layout: &Layout, rules: &[Rule]) -> String {
+    let mut lines = vec![format!("mkdir -p {}", shell(&layout.artifacts))];
+
+    for rule in rules {
+        match rule {
+            Rule::Env { value, .. } => lines.push(format!("mkdir -p {}", shell(value))),
+
+            Rule::Redirect { name, target } => {
+                let link = shell(&layout.source.join(name));
+                let target = shell(target);
+
+                lines.push(format!("mkdir -p {target}"));
+                lines.push(format!(
+                    "if [ ! -e {link} ]; then ln -s {target} {link}; fi"
+                ));
+            }
+        }
+    }
+
+    lines.join("; ")
 }
 
 /// A short phrase for the line borrow prints before it runs anything, so you can
@@ -242,5 +354,102 @@ mod tests {
         let rules = rules(&project, &layout_for(&project));
 
         assert_eq!(summary(&rules), Some("target, node_modules → local disk".to_string()));
+    }
+
+    fn source() -> Source {
+        Source {
+            user: "me".to_string(),
+            host: "100.64.0.2".to_string(),
+            port: None,
+            path: PathBuf::from("/Users/me/projects/app"),
+        }
+    }
+
+    fn keys() -> MountKeys {
+        MountKeys {
+            identity_file: PathBuf::from("/home/ado/.ssh/borrow_mount_ed25519"),
+            known_hosts: PathBuf::from("/home/ado/.config/borrow/known_hosts"),
+        }
+    }
+
+    #[test]
+    fn the_mount_pulls_from_the_client() {
+        let line = ensure_mounted(&layout_for(&project(vec![Stack::Rust])), &source(), &keys());
+
+        assert!(line.contains("me@100.64.0.2:/Users/me/projects/app"), "line was: {line}");
+        assert!(line.contains("/mnt/borrow/app"), "line was: {line}");
+    }
+
+    #[test]
+    fn the_mount_uses_borrows_own_key_and_known_hosts() {
+        let line = ensure_mounted(&layout_for(&project(vec![Stack::Rust])), &source(), &keys());
+
+        assert!(line.contains("IdentityFile=/home/ado/.ssh/borrow_mount_ed25519"), "line was: {line}");
+        assert!(
+            line.contains("UserKnownHostsFile=/home/ado/.config/borrow/known_hosts"),
+            "line was: {line}"
+        );
+        assert!(line.contains("StrictHostKeyChecking=yes"), "line was: {line}");
+    }
+
+    /// A healthy mount must survive. Remounting on every command would drop the
+    /// connection the next build is about to depend on.
+    #[test]
+    fn an_existing_mount_is_left_alone() {
+        let line = ensure_mounted(&layout_for(&project(vec![Stack::Rust])), &source(), &keys());
+
+        assert!(line.contains("if ! mountpoint -q"), "line was: {line}");
+    }
+
+    /// The whole reason the check is written the awkward way it is.
+    #[test]
+    fn a_stale_mount_is_forced_off_before_remounting() {
+        let line = ensure_mounted(&layout_for(&project(vec![Stack::Rust])), &source(), &keys());
+
+        assert!(line.contains("timeout 5 ls"), "line was: {line}");
+        assert!(line.contains("fusermount -u -z"), "line was: {line}");
+    }
+
+    #[test]
+    fn a_client_on_an_unusual_port_says_so() {
+        let mut source = source();
+        source.port = Some(2222);
+
+        let line = ensure_mounted(&layout_for(&project(vec![Stack::Rust])), &source, &keys());
+
+        assert!(line.contains("port=2222"), "line was: {line}");
+    }
+
+    #[test]
+    fn preparing_makes_the_artifact_directory() {
+        let project = project(vec![Stack::Rust]);
+        let layout = layout_for(&project);
+        let line = prepare(&layout, &rules(&project, &layout));
+
+        assert!(line.contains("mkdir -p /var/lib/borrow/builds/app/target"), "line was: {line}");
+    }
+
+    /// The mount is the user's real project directory, so a link is only ever added
+    /// where there is nothing already.
+    #[test]
+    fn a_redirect_never_replaces_something_that_exists() {
+        let project = project(vec![Stack::Node]);
+        let layout = layout_for(&project);
+        let line = prepare(&layout, &rules(&project, &layout));
+
+        assert!(
+            line.contains("if [ ! -e /mnt/borrow/app/node_modules ]; then ln -s"),
+            "line was: {line}"
+        );
+    }
+
+    #[test]
+    fn a_path_with_a_space_survives_the_shell() {
+        let mut source = source();
+        source.path = PathBuf::from("/Users/me/my projects/app");
+
+        let line = ensure_mounted(&layout_for(&project(vec![Stack::Rust])), &source, &keys());
+
+        assert!(line.contains("'me@100.64.0.2:/Users/me/my projects/app'"), "line was: {line}");
     }
 }

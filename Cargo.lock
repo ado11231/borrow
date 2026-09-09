@@ -110,6 +110,7 @@ dependencies = [
  "anyhow",
  "directories",
  "serde",
+ "shell-words",
  "sysinfo",
  "toml",
 ]
