@@ -2,8 +2,7 @@
 members = ["crates/*"]
 resolver = "3"
 
-# Versions live here so every crate builds against the same ones. Two crates
-# pinning tokio separately would quietly compile two runtimes into the binary.
+# Share dependency versions across the workspace.
 [workspace.dependencies]
 anyhow = "1.0.104"
 clap = { version = "4.6.6", features = ["derive"] }

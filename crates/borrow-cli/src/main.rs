@@ -8,10 +8,7 @@ mod ssh;
 use borrow_core::protocol::DEFAULT_PORT;
 use clap::{Parser, Subcommand};
 
-/// The command line, described as a type. clap derives the parser and `--help` from it.
-///
-/// `--agent` lives up here rather than on `run`, because `run` swallows everything
-/// after it so the remote command can have flags of its own.
+/// Global options precede run so the remote command can receive its own flags.
 #[derive(Parser)]
 #[command(name = "borrow", version, about = "Run heavy work on another machine", long_about = None)]
 struct Cli {
@@ -23,7 +20,6 @@ struct Cli {
     command: Commands,
 }
 
-/// One variant per subcommand; its fields are that subcommand's arguments.
 #[derive(Subcommand)]
 enum Commands {
     #[command(about = "Agent: start the daemon and print a pairing code")]
@@ -67,8 +63,7 @@ enum Commands {
     Health,
 }
 
-/// Parse and dispatch. `Ok(code)` is the remote command's exit status and is passed
-/// through; `Err` means borrow itself failed.
+/// Pass through command exit codes. Borrow failures exit with code 1.
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()

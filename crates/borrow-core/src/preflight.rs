@@ -1,8 +1,4 @@
-//! The checks that stand in for an installer.
-//!
-//! For everyone who is not the author, these checks are the setup experience. Every
-//! failure prints the command that fixes it and nothing is installed automatically.
-//! Successes print a line too, so a working box visibly passes.
+//! Setup checks with instructions for fixing missing tools and permissions.
 
 use crate::telemetry::is_installed;
 use std::net::{SocketAddr, TcpStream};
@@ -20,7 +16,6 @@ pub enum State {
     Fail,
 }
 
-/// One line of the report.
 #[derive(Debug)]
 pub struct Check {
     pub label: String,
@@ -42,8 +37,7 @@ impl Check {
     }
 }
 
-/// Print the report and say whether anything is broken. The caller decides what to
-/// do about a failure, because `serve` should stop and `link` may want to carry on.
+/// Print each check and return true if any check failed.
 pub fn report(checks: &[Check]) -> bool {
     for check in checks {
         let mark = match check.state {
@@ -119,11 +113,7 @@ pub fn tool_check(program: &str, state_when_missing: State) -> Check {
     }
 }
 
-/// Whether this account can create things in a directory borrow owns.
-///
-/// Both of borrow's directories live under root owned parents, so a stranger's
-/// first `serve` would otherwise fail deep inside a shell script with a bare
-/// permission error. Checked here instead, with the two commands that fix it.
+/// Check write access before mount setup and explain how to fix permissions.
 pub fn writable_check(path: &str, purpose: &str) -> Check {
     let dir = std::path::Path::new(path);
 

@@ -89,7 +89,6 @@ fn dir() -> anyhow::Result<PathBuf> {
     Ok(dirs.config_dir().to_path_buf())
 }
 
-/// Full path to the config file.
 pub fn path() -> anyhow::Result<PathBuf> {
     Ok(dir()?.join("config.toml"))
 }

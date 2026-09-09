@@ -12,10 +12,7 @@ use tokio::process::Command;
 /// exiting on its own. 130 is the shell convention for "terminated by SIGINT".
 const EXIT_SIGNALLED: i32 = 130;
 
-/// Options passed to every ssh call. BatchMode fails loudly rather than quietly
-/// asking for a password. The alive settings keep a long build from dying on an
-/// idle connection. LogLevel hides ssh's own chatter, such as the closing notice
-/// after every command, while leaving real failures visible.
+/// Disable password prompts, keep idle connections alive, and show SSH errors only.
 const SSH_OPTIONS: &[&str] = &[
     "BatchMode=yes",
     "ConnectTimeout=10",
@@ -24,11 +21,8 @@ const SSH_OPTIONS: &[&str] = &[
     "LogLevel=ERROR",
 ];
 
-/// Whether to ask ssh for a terminal on the box.
-///
-/// A terminal is what makes ctrl-c stop the remote command, but it merges stderr
-/// into stdout and ends lines with \r\n. So ask for one only when a person is at
-/// the keyboard, and keep clean separate streams whenever output is redirected.
+/// Request a terminal only for interactive use.
+/// A terminal lets Ctrl C reach remote work but merges stdout and stderr.
 fn wants_terminal() -> bool {
     use std::io::IsTerminal;
 
@@ -83,12 +77,8 @@ impl RemoteCommand {
         }
     }
 
-    /// The single string the remote shell will parse.
-    ///
-    /// Every piece the user supplied is quoted first, so characters like `$` and
-    /// `;` arrive as text instead of being run. The parts are joined with `&&`
-    /// rather than `;` on purpose: if the mount fails to come up, the build must
-    /// not then run in an empty directory and appear to succeed at nothing.
+    /// Quote user arguments before passing them to the remote shell.
+    /// Join setup steps with && so failure prevents command execution.
     pub fn command_line(&self) -> String {
         let user_command = join(
             std::iter::once(self.program.as_str())
@@ -280,10 +270,7 @@ mod tests {
         );
     }
 
-    /// ssh splits this option on whitespace because it can name several files.
-    /// Without quotes a directory containing a space makes the box look unknown.
-    /// ssh narrates its own lifecycle at INFO, which would put a closing notice
-    /// after every single command. Errors stay visible at ERROR.
+    /// Quote the known hosts path because SSH splits this option on whitespace.
     #[test]
     fn ssh_is_told_to_keep_quiet_about_itself() {
         let argv = remote(&["hi"]).to_ssh_args();

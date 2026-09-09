@@ -1,12 +1,8 @@
-//! The small set of messages the Client and the Agent exchange.
-//!
-//! One request, one response, newline delimited JSON over TCP. The daemon is the
-//! control plane, so these messages carry facts about the box and never carry work.
+//! Client and Agent messages, sent as newline separated JSON over TCP.
 
 use serde::{Deserialize, Serialize};
 
-/// The port the daemon listens on by default. Picked to sit well clear of the
-/// common ranges so it rarely collides with anything already running.
+/// Default Agent control port.
 pub const DEFAULT_PORT: u16 = 7433;
 
 /// What the Client asks for.
@@ -89,8 +85,7 @@ pub struct Gpu {
     pub vram_mb: Option<u64>,
 }
 
-/// A live snapshot. Every number here is the sort that would make somebody
-/// cancel a job, so free and available are reported rather than totals.
+/// Current resource usage and available capacity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Health {
     pub cpu_percent: f32,

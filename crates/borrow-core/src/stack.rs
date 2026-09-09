@@ -1,12 +1,8 @@
-//! Working out what kind of project you are in.
-//!
-//! This is what makes zero configuration possible. Detect the stack, and the
-//! artifact split follows from it. Detection is deliberately dumb: look for the
-//! file that defines each ecosystem, and never guess from anything else.
+//! Project discovery from Rust, Node, Python, and Borrow marker files.
 
 use std::path::{Path, PathBuf};
 
-/// A stack borrow knows how to keep build output off the mount.
+/// A supported stack with rules for local Agent build output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stack {
     Rust,
@@ -14,9 +10,7 @@ pub enum Stack {
     Python,
 }
 
-/// The file that says "a project of this kind lives here". `borrow.toml` is listed
-/// too, so a project borrow has been told about is found even when it looks like
-/// nothing in particular.
+/// Project markers. A borrow.toml file also marks a project without a known stack.
 const MARKERS: &[(&str, Option<Stack>)] = &[
     ("borrow.toml", None),
     ("Cargo.toml", Some(Stack::Rust)),
@@ -25,9 +19,7 @@ const MARKERS: &[(&str, Option<Stack>)] = &[
     ("requirements.txt", Some(Stack::Python)),
 ];
 
-/// A project directory and what it is built with. `stacks` is a list because plenty
-/// of real projects are more than one thing, and a Rust binary with a Node frontend
-/// needs both splits or the one you missed lands on the mount.
+/// A project root and its detected stacks. Mixed projects need every applicable split.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Project {
     pub root: PathBuf,
@@ -57,17 +49,12 @@ pub fn stacks_in(dir: &Path) -> Vec<Stack> {
     found
 }
 
-/// True when a directory looks like the top of a project.
 fn is_project_root(dir: &Path) -> bool {
     MARKERS.iter().any(|(marker, _)| dir.join(marker).exists())
 }
 
-/// Walk up from `start` until a directory looks like a project root.
-///
-/// Walking up is the point: you run `borrow run cargo build` from wherever you
-/// happen to be, and the project is usually somewhere above you. The first match
-/// wins, so a workspace member is treated as the project rather than the workspace,
-/// which is what you meant when you typed the command in there.
+/// Find the nearest project marker at or above start.
+/// A workspace member is selected before its parent workspace.
 pub fn find(start: &Path) -> Option<Project> {
     let mut dir = start;
 

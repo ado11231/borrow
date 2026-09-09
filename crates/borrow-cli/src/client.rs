@@ -1,8 +1,4 @@
-//! Talking to the Agent's daemon from the Client.
-//!
-//! One connection carries one request and one response, both as a single line of
-//! JSON. Small and boring on purpose: this is the control plane, and the real work
-//! travels over ssh instead.
+//! Client requests to the Agent. Each connection exchanges one JSON request and response.
 
 use borrow_core::protocol::{Request, Response};
 use anyhow::Context;

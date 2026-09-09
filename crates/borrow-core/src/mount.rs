@@ -1,9 +1,5 @@
-//! Where a project appears on the Agent, and where its build output goes instead.
-//!
-//! This is the make or break of the whole tool. Source travels over the mount, and
-//! build output must not, because a compiler writes thousands of small files and
-//! every one of them over a network filesystem turns a fast build into a painful
-//! one. Getting this wrong does not make borrow slower, it makes borrow pointless.
+//! Agent source mounts and local build output.
+//! Generated files stay on Agent storage to avoid network file operations.
 
 use crate::stack::{Project, Stack};
 use shell_words::quote;
@@ -54,15 +50,11 @@ pub enum Rule {
     /// tidiest kind, because nothing appears in the project at all.
     Env { key: &'static str, value: PathBuf },
 
-    /// A directory the tool insists on finding inside the project. Nothing can talk
-    /// it out of the location, so the Agent puts a link there pointing at local
-    /// disk. Every one of these is gitignored in practice, which is what makes a
-    /// link in your source tree tolerable.
+    /// Link a required project directory to Agent storage.
     Redirect { name: &'static str, target: PathBuf },
 }
 
-/// What to do for this project. A project with several stacks gets the rules for
-/// all of them, because missing one leaves that stack's output on the mount.
+/// Combine split rules for every detected stack.
 pub fn rules(project: &Project, layout: &Layout) -> Vec<Rule> {
     let mut rules = Vec::new();
 
@@ -118,10 +110,7 @@ pub fn redirects(rules: &[Rule]) -> Vec<(&'static str, &Path)> {
         .collect()
 }
 
-/// Options handed to `sshfs`. `reconnect` plus the alive settings are what stop a
-/// laptop closing its lid from leaving a mount that hangs forever. `idmap=user`
-/// maps the Client's ownership onto the Agent's account, so files do not all
-/// arrive owned by somebody who does not exist on the other machine.
+/// Reconnect after interruptions and map file ownership to the Agent account.
 const SSHFS_OPTIONS: &[&str] = &[
     "reconnect",
     "ServerAliveInterval=15",
@@ -132,9 +121,7 @@ const SSHFS_OPTIONS: &[&str] = &[
     "follow_symlinks",
 ];
 
-/// How long to wait before deciding a mount point is stale rather than slow. A dead
-/// SSHFS mount does not return an error, it blocks, so the only way to tell is to
-/// give it a deadline.
+/// Limit mount probes because stale SSHFS operations may block.
 const STALE_TIMEOUT_SECONDS: u32 = 5;
 
 /// Where the source actually lives, described the way the Agent has to dial it.
@@ -182,15 +169,8 @@ fn sshfs(layout: &Layout, source: &Source, keys: &MountKeys) -> String {
     )
 }
 
-/// The shell line that leaves the project mounted on the Agent, whatever state it
-/// was in beforehand.
-///
-/// Three cases have to be handled, and only the first is obvious. A missing mount
-/// gets made. An existing healthy mount is left alone, because remounting on every
-/// command would throw away the connection a build is about to use. A **stale**
-/// mount is the awkward one: it is still listed as mounted, but every access to it
-/// blocks forever rather than failing. Reaching it behind `timeout` is the only way
-/// to find out, and a mount that fails that test is forced off before remounting.
+/// Mount the project if missing, or replace a stale mount.
+/// Probe with a timeout because a stale SSHFS mount can block indefinitely.
 pub fn ensure_mounted(layout: &Layout, source: &Source, keys: &MountKeys) -> String {
     let mount = shell(&layout.source);
 
@@ -202,11 +182,7 @@ pub fn ensure_mounted(layout: &Layout, source: &Source, keys: &MountKeys) -> Str
     , sshfs = sshfs(layout, source, keys))
 }
 
-/// The shell line that puts the artifact directories in place before anything runs.
-///
-/// A `Redirect` is only created when nothing is there already. That guard matters:
-/// the mount is the user's real project directory, so a careless `ln -s` would
-/// replace a `node_modules` they are still using on their own machine.
+/// Create artifact folders and links without replacing existing project directories.
 pub fn prepare(layout: &Layout, rules: &[Rule]) -> String {
     let mut lines = vec![format!("mkdir -p {}", shell(&layout.artifacts))];
 
@@ -229,8 +205,7 @@ pub fn prepare(layout: &Layout, rules: &[Rule]) -> String {
     lines.join("; ")
 }
 
-/// A short phrase for the line borrow prints before it runs anything, so you can
-/// see the split happened rather than trusting that it did.
+/// Describe which generated files should use Agent storage.
 pub fn summary(rules: &[Rule]) -> Option<String> {
     let names: Vec<&str> = rules
         .iter()

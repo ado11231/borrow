@@ -4,12 +4,8 @@ use borrow_core::config::Config;
 use borrow_core::keys::marker;
 use crate::ssh::RemoteCommand;
 
-/// Undo pairing in both directions, then forget the box.
-///
-/// Order matters. The mount comes down first, because taking the Agent's key out of
-/// this machine's authorized_keys while a mount is live leaves one that hangs and
-/// can no longer reconnect. Each key is found by the marker written into its
-/// comment at pairing, so nothing else in either file is touched.
+/// Unmount before revoking either key so live mounts can be released.
+/// Find installed keys by their Borrow markers.
 pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
     let mut config = Config::load()?;
     let target = config.resolve(agent.as_deref())?.clone();

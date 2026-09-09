@@ -1,7 +1,4 @@
-//! `borrow serve`: the daemon that runs on the Agent.
-//!
-//! It answers questions about the box and hands out one key at pairing time. It
-//! never runs your work: commands travel over ssh instead.
+//! Agent pairing, machine information, and health. Commands run through SSH.
 
 use borrow_core::keys;
 use borrow_core::preflight;
@@ -138,9 +135,7 @@ fn answer(request: Request, agent: &Agent, peer: IpAddr) -> Response {
     }
 }
 
-/// Trade a valid token for an installed key. The token is taken out of the daemon
-/// before the key is written, so two Clients racing cannot both pair.
-/// What the Client told us about itself at pairing.
+/// Client identity received during pairing.
 struct Client {
     name: String,
     public_key: String,
@@ -178,12 +173,7 @@ fn pair(agent: &Agent, token: &str, client: &Client, peer: IpAddr) -> Response {
     }
 }
 
-/// Set up both directions of trust and describe the result.
-///
-/// Two independent one way trusts are established here and neither private key
-/// moves. The Client gets to run commands on this box, and this box gets to reach
-/// back for the mount. The second half is the new part in Phase 2, and it is why
-/// the Client sends its own identity in the pairing request.
+/// Establish both SSH trust directions without moving private keys.
 fn accept(agent: &Agent, client: &Client, peer: IpAddr) -> anyhow::Result<Paired> {
     let authorized = keys::authorize(&client.name, &client.public_key)
         .context("could not add the Client's key to authorized_keys")?;
@@ -212,12 +202,7 @@ fn accept(agent: &Agent, client: &Client, peer: IpAddr) -> anyhow::Result<Paired
     })
 }
 
-/// The key this box uses to pull the mount, made once and kept.
-///
-/// It is a separate key from anything the user owns, with no passphrase, because
-/// the mount has to come up without a human present to unlock an agent. Keeping it
-/// distinct is also what makes it revocable: it appears in the Client's
-/// authorized_keys under borrow's own marker and nowhere else.
+/// Create a dedicated mount key once. It has no passphrase for unattended mounts.
 fn mount_key() -> anyhow::Result<(std::path::PathBuf, String)> {
     let private = keys::ssh_dir()?.join(MOUNT_KEY_NAME);
     let public = private.with_extension("pub");
@@ -244,8 +229,7 @@ fn mount_key() -> anyhow::Result<(std::path::PathBuf, String)> {
     Ok((private, text.trim().to_string()))
 }
 
-/// A fresh pairing code. Uses the operating system's randomness, so a code cannot be
-/// guessed from knowing when the daemon started.
+/// Generate a token using operating system randomness.
 fn new_token() -> String {
     (0..CODE_LENGTH)
         .map(|_| CODE_ALPHABET[rand::random_range(0..CODE_ALPHABET.len())] as char)
@@ -310,11 +294,8 @@ fn network_label(ip: IpAddr) -> &'static str {
     }
 }
 
-/// Print the pairing code once, to the owner's own console. It is never written to
-/// a file and never logged, because whoever holds it can install a key.
-///
-/// Every address gets its own code rather than one code plus a footnote, because a
-/// code you cannot paste is not a code.
+/// Print the pairing token only to the owner's console, never to logs or files.
+/// Show a complete copyable command for each available address.
 fn announce(name: &str, addresses: &[SocketAddr], token: &str) {
     let reachable: Vec<&SocketAddr> =
         addresses.iter().filter(|a| !a.ip().is_loopback()).collect();

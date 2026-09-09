@@ -4,8 +4,7 @@ use crate::client;
 use borrow_core::config::Config;
 use borrow_core::protocol::{Health, Request, Response};
 
-/// Ask the box for a live snapshot. Always fetched, never cached, because a cached
-/// answer to "is there room for this build" is worse than no answer at all.
+/// Fetch current resource use without using cached values.
 pub async fn health(agent: Option<String>) -> anyhow::Result<i32> {
     let config = Config::load()?;
     let target = config.resolve(agent.as_deref())?;

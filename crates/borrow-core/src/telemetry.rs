@@ -1,8 +1,4 @@
-//! Reading the box's specs and health.
-//!
-//! Everything here runs on the Agent. Collection is cheap on purpose: sysinfo for
-//! CPU, memory and disk, nvidia-smi for GPU. A box with no GPU is normal, not an
-//! error, so the GPU list simply comes back empty.
+//! Agent hardware and resource measurements. GPU data is optional.
 
 use crate::protocol::{Gpu, GpuHealth, Health, Specs};
 use std::process::Command;

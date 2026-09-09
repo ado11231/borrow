@@ -4,8 +4,7 @@ use crate::client;
 use borrow_core::config::Config;
 use borrow_core::protocol::{Request, Response, Specs};
 
-/// Print the box's static specs. These come from the cache saved at pairing, so the
-/// usual case is instant and works even when the box is asleep.
+/// Use cached specifications unless a refresh is requested.
 pub async fn info(agent: Option<String>, refresh: bool) -> anyhow::Result<i32> {
     let mut config = Config::load()?;
     let target = config.resolve(agent.as_deref())?.clone();

@@ -16,11 +16,7 @@ pub fn marker(client_name: &str) -> String {
 /// Where sshd publishes the public half of a machine's host keys.
 const HOST_KEY_DIR: &str = "/etc/ssh";
 
-/// This machine's ssh host keys.
-///
-/// Both sides need this now. Sending them at pairing is what lets the very first
-/// connection in either direction succeed without a human being asked to compare a
-/// fingerprint they have no way of checking anyway.
+/// Read public host keys for the pairing exchange.
 pub fn host_keys() -> Vec<String> {
     let Ok(entries) = fs::read_dir(HOST_KEY_DIR) else {
         return Vec::new();
@@ -111,18 +107,9 @@ fn write_lines(file: &PathBuf, lines: &[String]) -> anyhow::Result<()> {
     fs::write(file, body).with_context(|| format!("could not write {}", file.display()))
 }
 
-/// Add a public key to this machine's authorized_keys, replacing any older key
-/// carrying the same marker.
-///
-/// Both machines call this now, once in each direction: the Agent authorises the
-/// Client so `run` works, and the Client authorises the Agent so the mount can be
-/// pulled. The file is rewritten whole, because appending to one with no trailing
-/// newline welds two keys into a single broken line and locks you out.
-///
-/// The comment is **replaced** rather than trusted. Whatever the other machine
-/// called its key, the line written here ends with the marker this machine will
-/// search for when revoking it. A key that cannot be found again cannot be taken
-/// back out, so the two must never be allowed to drift apart.
+/// Authorize a public key using the same marker that unlink uses to revoke it.
+/// Rewrite complete lines so a missing trailing newline cannot merge keys.
+/// Both machines use this to establish trust without sharing private keys.
 pub fn authorize(peer: &str, public_key: &str) -> anyhow::Result<PathBuf> {
     let tag = marker(peer);
     let key = authorized_line(peer, public_key)?;
@@ -152,8 +139,7 @@ pub fn authorize(peer: &str, public_key: &str) -> anyhow::Result<PathBuf> {
     Ok(file)
 }
 
-/// Lock a file down to its owner. ssh refuses to use keys and authorized_keys files
-/// that anybody else can read, so this is required rather than tidy.
+/// Set owner permissions for SSH files.
 pub fn set_mode(path: &std::path::Path, mode: u32) -> anyhow::Result<()> {
     #[cfg(unix)]
     {
@@ -176,7 +162,7 @@ fn authorized_line(peer: &str, public_key: &str) -> anyhow::Result<String> {
     }
 }
 
-/// Take a key back out of authorized_keys. What makes `unlink` mean something.
+/// Remove the key carrying this peer's Borrow marker.
 pub fn deauthorize(peer: &str) -> anyhow::Result<()> {
     let file = ssh_dir()?.join("authorized_keys");
 
@@ -199,7 +185,6 @@ pub fn deauthorize(peer: &str) -> anyhow::Result<()> {
     set_mode(&file, 0o600)
 }
 
-/// Where ssh keeps this account's keys.
 pub fn ssh_dir() -> anyhow::Result<PathBuf> {
     let Some(base) = directories::BaseDirs::new() else {
         anyhow::bail!("could not determine home directory");

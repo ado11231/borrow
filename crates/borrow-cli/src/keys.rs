@@ -1,7 +1,4 @@
-//! The ssh key borrow uses, and nothing else.
-//!
-//! borrow keeps its own key rather than reusing your personal one, so the key on a
-//! box is clearly borrow's and `unlink` can take it back out.
+//! Borrow uses a dedicated SSH key so unlink can revoke its access.
 
 use anyhow::Context;
 use borrow_core::keys::marker;
@@ -54,4 +51,3 @@ pub fn ensure(client_name: &str) -> anyhow::Result<(PathBuf, String)> {
 
     Ok((private, text.trim().to_string()))
 }
-
