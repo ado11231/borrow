@@ -2,7 +2,7 @@
 
 use borrow_core::config;
 use anyhow::Context;
-use shell_words::join;
+use shell_words::{join, quote};
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -35,8 +35,11 @@ fn wants_terminal() -> bool {
     std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }
 
-/// A command to run on the Agent. `cwd` and `env` are unused for now; they will carry
-/// the mounted project path and the artifact split variables in Phase 2.
+/// A command to run on the Agent.
+///
+/// `setup` holds shell lines that must succeed before the command runs, such as
+/// bringing the mount up. `cwd` is the mounted project on the Agent, and `env`
+/// carries the artifact split variables that keep build output off it.
 pub struct RemoteCommand {
     pub host: String,
     pub user: Option<String>,
@@ -47,9 +50,9 @@ pub struct RemoteCommand {
     pub tty: bool,
     pub program: String,
     pub args: Vec<String>,
-    #[allow(dead_code)]
+    /// Shell lines run first, joined so that a failure stops everything after it.
+    pub setup: Vec<String>,
     pub cwd: Option<String>,
-    #[allow(dead_code)]
     pub env: Vec<(String, String)>,
 }
 
@@ -66,6 +69,7 @@ impl RemoteCommand {
             tty: wants_terminal(),
             program,
             args,
+            setup: Vec::new(),
             cwd: None,
             env: Vec::new(),
         }
@@ -79,13 +83,39 @@ impl RemoteCommand {
         }
     }
 
-    /// The single string the remote shell will parse. Every piece is quoted first,
-    /// so characters like `$` and `;` arrive as text instead of being run.
+    /// The single string the remote shell will parse.
+    ///
+    /// Every piece the user supplied is quoted first, so characters like `$` and
+    /// `;` arrive as text instead of being run. The parts are joined with `&&`
+    /// rather than `;` on purpose: if the mount fails to come up, the build must
+    /// not then run in an empty directory and appear to succeed at nothing.
     pub fn command_line(&self) -> String {
-        join(
+        let user_command = join(
             std::iter::once(self.program.as_str())
                 .chain(self.args.iter().map(|s| s.as_str())),
-        )
+        );
+
+        let mut parts = self.setup.clone();
+
+        if let Some(cwd) = &self.cwd {
+            parts.push(format!("cd {}", quote(cwd)));
+        }
+
+        parts.push(match self.env.is_empty() {
+            true => user_command,
+            false => {
+                let assignments = self
+                    .env
+                    .iter()
+                    .map(|(key, value)| quote(&format!("{key}={value}")).into_owned())
+                    .collect::<Vec<String>>()
+                    .join(" ");
+
+                format!("env {assignments} {user_command}")
+            }
+        });
+
+        parts.join(" && ")
     }
 
     /// The full argument list for `ssh`. Options first, then the destination, then
@@ -188,6 +218,7 @@ mod tests {
             tty: false,
             program: "echo".to_string(),
             args: args.iter().map(|s| s.to_string()).collect(),
+            setup: Vec::new(),
             cwd: None,
             env: Vec::new(),
         }
@@ -291,5 +322,54 @@ mod tests {
         let argv = remote(&["hi"]).to_ssh_args();
 
         assert!(!argv.contains(&"-i".to_string()), "argv was: {argv:?}");
+    }
+
+    #[test]
+    fn a_working_directory_becomes_a_cd() {
+        let mut command = remote(&["hi"]);
+        command.cwd = Some("/mnt/borrow/app".to_string());
+
+        assert_eq!(command.command_line(), "cd /mnt/borrow/app && echo hi");
+    }
+
+    /// The assignment is quoted whole rather than by halves, so a value is never
+    /// able to end the word it is in.
+    #[test]
+    fn split_variables_are_put_in_front_of_the_command() {
+        let mut command = remote(&["hi"]);
+        command.env = vec![("CARGO_TARGET_DIR".to_string(), "/var/lib/b/target".to_string())];
+
+        assert_eq!(
+            command.command_line(),
+            "env 'CARGO_TARGET_DIR=/var/lib/b/target' echo hi"
+        );
+    }
+
+    /// The reason the parts are joined with && rather than ;. A failed mount must
+    /// stop the build, not let it run somewhere empty and look like it worked.
+    #[test]
+    fn a_failed_setup_step_stops_the_command() {
+        let mut command = remote(&["hi"]);
+        command.setup = vec!["mount_it".to_string()];
+        command.cwd = Some("/mnt/borrow/app".to_string());
+
+        assert_eq!(command.command_line(), "mount_it && cd /mnt/borrow/app && echo hi");
+    }
+
+    #[test]
+    fn a_project_path_with_a_space_stays_one_word() {
+        let mut command = remote(&["hi"]);
+        command.cwd = Some("/mnt/borrow/my app".to_string());
+
+        assert_eq!(command.command_line(), "cd '/mnt/borrow/my app' && echo hi");
+    }
+
+    /// A variable's value is user controlled, so it is quoted like anything else.
+    #[test]
+    fn a_variable_value_cannot_break_out() {
+        let mut command = remote(&["hi"]);
+        command.env = vec![("K".to_string(), "a; rm -rf /".to_string())];
+
+        assert_eq!(command.command_line(), "env 'K=a; rm -rf /' echo hi");
     }
 }
