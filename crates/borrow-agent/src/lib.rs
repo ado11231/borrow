@@ -1,10 +1,10 @@
 //! Agent pairing, machine information, and health. Commands run through SSH.
 
+use anyhow::Context;
 use borrow_core::keys;
 use borrow_core::preflight;
 use borrow_core::protocol::{Paired, Request, Response};
 use borrow_core::telemetry;
-use anyhow::Context;
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
@@ -48,10 +48,10 @@ pub async fn serve(name: Option<String>, port: u16) -> anyhow::Result<i32> {
         .unwrap_or_else(|| "agent".to_string());
 
     if preflight::report(&preflight::serve_checks()) {
-        anyhow::bail!("fix the lines marked ✗ above, then run borrow serve again");
+        anyhow::bail!("Fix the reported errors, then run borrow serve again");
     }
 
-    let user = whoami().context("could not work out which user is running the daemon")?;
+    let user = whoami().context("Could not work out which user is running the daemon")?;
     let token = new_token();
 
     let agent = Arc::new(Agent {
@@ -70,12 +70,12 @@ pub async fn serve(name: Option<String>, port: u16) -> anyhow::Result<i32> {
     for addr in &addresses {
         match TcpListener::bind(addr).await {
             Ok(listener) => listeners.push(listener),
-            Err(e) => warn!("could not listen on {addr}: {e}"),
+            Err(e) => warn!("Could not listen on {addr}: {e}"),
         }
     }
 
     if listeners.is_empty() {
-        anyhow::bail!("could not listen on any address; is port {port} already in use?");
+        anyhow::bail!("Could not listen on any address; is port {port} already in use?");
     }
 
     let mut tasks = Vec::new();
@@ -85,7 +85,7 @@ pub async fn serve(name: Option<String>, port: u16) -> anyhow::Result<i32> {
     }
 
     tokio::signal::ctrl_c().await.ok();
-    eprintln!("\nstopping");
+    eprintln!("\nStopping");
 
     Ok(0)
 }
@@ -102,7 +102,7 @@ async fn accept_loop(listener: TcpListener, agent: Arc<Agent>) {
                     }
                 });
             }
-            Err(e) => warn!("could not accept a connection: {e}"),
+            Err(e) => warn!("Could not accept a connection: {e}"),
         }
     }
 }
@@ -115,7 +115,9 @@ async fn handle(mut stream: TcpStream, agent: Arc<Agent>, peer: IpAddr) -> anyho
 
     let response = match serde_json::from_str::<Request>(line.trim()) {
         Ok(request) => answer(request, &agent, peer),
-        Err(e) => Response::Error { message: format!("could not understand that request: {e}") },
+        Err(e) => Response::Error {
+            message: format!("Could not understand that request: {e}"),
+        },
     };
 
     let mut reply = serde_json::to_string(&response)?;
@@ -129,9 +131,23 @@ fn answer(request: Request, agent: &Agent, peer: IpAddr) -> Response {
     match request {
         Request::Info => Response::Info(telemetry::specs(&agent.name)),
         Request::Health => Response::Health(telemetry::health()),
-        Request::Pair { token, client, public_key, user, host_keys } => {
-            pair(agent, &token, &Client { name: client, public_key, user, host_keys }, peer)
-        }
+        Request::Pair {
+            token,
+            client,
+            public_key,
+            user,
+            host_keys,
+        } => pair(
+            agent,
+            &token,
+            &Client {
+                name: client,
+                public_key,
+                user,
+                host_keys,
+            },
+            peer,
+        ),
     }
 }
 
@@ -163,12 +179,12 @@ fn pair(agent: &Agent, token: &str, client: &Client, peer: IpAddr) -> Response {
 
     match claimed {
         None => Response::Error {
-            message: "that pairing code has expired or was already used; run borrow serve again for a fresh one".to_string(),
+            message: "That pairing code has expired or was already used; run borrow serve again for a fresh one".to_string(),
         },
-        Some(false) => Response::Error { message: "that pairing code is not right".to_string() },
+        Some(false) => Response::Error { message: "That pairing code is not right".to_string() },
         Some(true) => match accept(agent, client, peer) {
             Ok(paired) => Response::Paired(paired),
-            Err(e) => Response::Error { message: format!("could not finish pairing: {e:#}") },
+            Err(e) => Response::Error { message: format!("Could not finish pairing: {e:#}") },
         },
     }
 }
@@ -176,19 +192,19 @@ fn pair(agent: &Agent, token: &str, client: &Client, peer: IpAddr) -> Response {
 /// Establish both SSH trust directions without moving private keys.
 fn accept(agent: &Agent, client: &Client, peer: IpAddr) -> anyhow::Result<Paired> {
     let authorized = keys::authorize(&client.name, &client.public_key)
-        .context("could not add the Client's key to authorized_keys")?;
+        .context("Could not add the Client's key to authorized_keys")?;
 
     let known_hosts = keys::learn_host(&peer.to_string(), None, &client.host_keys)
-        .context("could not record the Client's host keys")?;
+        .context("Could not record the Client's host keys")?;
 
     let (identity_file, mount_key) =
-        mount_key().context("could not prepare this box's key for the mount")?;
+        mount_key().context("Could not prepare this box's key for the mount")?;
 
     info!("paired with {}", client.name);
-    eprintln!("✓ paired with {}", client.name);
-    eprintln!("  authorized {}", authorized.display());
-    eprintln!("  mount key  {}", identity_file.display());
-    eprintln!("  will mount from {}@{}", client.user, peer);
+    borrow_core::presentation::success(format!("Paired with {}", client.name));
+    borrow_core::presentation::detail("Authorized", authorized.display());
+    borrow_core::presentation::detail("Mount key", identity_file.display());
+    borrow_core::presentation::detail("Mount source", format!("{}@{}", client.user, peer));
 
     Ok(Paired {
         name: agent.name.clone(),
@@ -211,16 +227,28 @@ fn mount_key() -> anyhow::Result<(std::path::PathBuf, String)> {
         fs::create_dir_all(keys::ssh_dir()?)?;
         keys::set_mode(&keys::ssh_dir()?, 0o700)?;
 
-        eprintln!("generating a mount key at {}", private.display());
+        eprintln!("Generating a mount key at {}", private.display());
 
         let status = std::process::Command::new("ssh-keygen")
-            .args(["-t", "ed25519", "-N", "", "-q", "-C", &keys::marker("mount"), "-f"])
+            .args([
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-q",
+                "-C",
+                &keys::marker("mount"),
+                "-f",
+            ])
             .arg(&private)
             .status()
-            .context("could not run ssh-keygen")?;
+            .context("Could not run ssh-keygen")?;
 
         if !status.success() {
-            anyhow::bail!("ssh-keygen failed while creating {}", private.display());
+            anyhow::bail!(
+                "SSH key generation failed while creating {}",
+                private.display()
+            );
         }
     }
 
@@ -281,24 +309,23 @@ fn local_ip_towards(target: &str) -> Option<IpAddr> {
 /// found, because a box routing everything over a VPN would otherwise mislabel it.
 fn network_label(ip: IpAddr) -> &'static str {
     let IpAddr::V4(v4) = ip else {
-        return "network";
+        return "Network";
     };
 
     let [first, second, ..] = v4.octets();
 
     match () {
-        _ if v4.is_loopback() => "this machine",
-        _ if first == 100 && (64..128).contains(&second) => "tailscale",
-        _ if v4.is_private() => "local network",
-        _ => "network",
+        _ if v4.is_loopback() => "This machine",
+        _ if first == 100 && (64..128).contains(&second) => "Tailscale",
+        _ if v4.is_private() => "Local network",
+        _ => "Network",
     }
 }
 
 /// Print the pairing token only to the owner's console, never to logs or files.
 /// Show a complete copyable command for each available address.
 fn announce(name: &str, addresses: &[SocketAddr], token: &str) {
-    let reachable: Vec<&SocketAddr> =
-        addresses.iter().filter(|a| !a.ip().is_loopback()).collect();
+    let reachable: Vec<&SocketAddr> = addresses.iter().filter(|a| !a.ip().is_loopback()).collect();
 
     let offered = match reachable.is_empty() {
         true => addresses.iter().collect(),
@@ -306,17 +333,17 @@ fn announce(name: &str, addresses: &[SocketAddr], token: &str) {
     };
 
     eprintln!();
-    eprintln!("borrow is serving {name}");
+    borrow_core::presentation::progress(format!("Borrow is serving {name}"));
     eprintln!();
 
     if offered.is_empty() {
-        eprintln!("  no address to pair on");
+        eprintln!("  No address to pair on");
         return;
     }
 
     match offered.len() {
-        1 => eprintln!("  on the other machine, run:"),
-        _ => eprintln!("  on the other machine, run whichever reaches this box:"),
+        1 => eprintln!("  On the other machine, run:"),
+        _ => eprintln!("  On the other machine, run whichever reaches this box:"),
     }
 
     eprintln!();
@@ -338,8 +365,11 @@ fn announce(name: &str, addresses: &[SocketAddr], token: &str) {
     }
 
     eprintln!();
-    eprintln!("  the code works once and expires in {} minutes", CODE_LIFETIME.as_secs() / 60);
-    eprintln!("  ctrl-c to stop");
+    eprintln!(
+        "  The code works once and expires in {} minutes",
+        CODE_LIFETIME.as_secs() / 60
+    );
+    eprintln!("  Press Ctrl C to stop");
     eprintln!();
 }
 
@@ -349,24 +379,30 @@ mod tests {
 
     #[test]
     fn a_tailnet_address_is_named() {
-        assert_eq!(network_label("100.67.90.119".parse().unwrap()), "tailscale");
+        assert_eq!(network_label("100.67.90.119".parse().unwrap()), "Tailscale");
     }
 
     #[test]
     fn a_home_network_address_is_named() {
-        assert_eq!(network_label("10.0.0.193".parse().unwrap()), "local network");
-        assert_eq!(network_label("192.168.1.7".parse().unwrap()), "local network");
+        assert_eq!(
+            network_label("10.0.0.193".parse().unwrap()),
+            "Local network"
+        );
+        assert_eq!(
+            network_label("192.168.1.7".parse().unwrap()),
+            "Local network"
+        );
     }
 
     /// 100.x is only a tailnet address inside the carrier grade NAT range. A public
     /// address that merely starts with 100 must not be mistaken for one.
     #[test]
     fn a_public_hundred_address_is_not_tailscale() {
-        assert_eq!(network_label("100.20.0.1".parse().unwrap()), "network");
+        assert_eq!(network_label("100.20.0.1".parse().unwrap()), "Network");
     }
 
     #[test]
     fn loopback_is_named_as_this_machine() {
-        assert_eq!(network_label("127.0.0.1".parse().unwrap()), "this machine");
+        assert_eq!(network_label("127.0.0.1".parse().unwrap()), "This machine");
     }
 }

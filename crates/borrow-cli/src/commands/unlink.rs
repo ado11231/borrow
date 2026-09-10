@@ -1,8 +1,8 @@
 //! `borrow unlink`: take the key back off a box and forget it.
 
+use crate::ssh::RemoteCommand;
 use borrow_core::config::Config;
 use borrow_core::keys::marker;
-use crate::ssh::RemoteCommand;
 
 /// Unmount before revoking either key so live mounts can be released.
 /// Find installed keys by their Borrow markers.
@@ -11,7 +11,10 @@ pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
     let target = config.resolve(agent.as_deref())?.clone();
     let tag = marker(&this_machine());
 
-    eprintln!("▶ unmounting and removing borrow's key on {}", target.name);
+    borrow_core::presentation::progress(format!(
+        "Unmounting and removing borrow's key on {}",
+        target.name
+    ));
 
     let unmount = RemoteCommand::to(
         &target,
@@ -20,29 +23,39 @@ pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
     );
 
     match unmount.execute().await {
-        Ok(0) => eprintln!("✓ mounts released on {}", target.name),
-        Ok(_) | Err(_) => eprintln!("! could not release mounts on {}", target.name),
+        Ok(0) => borrow_core::presentation::success(format!("Mounts released on {}", target.name)),
+        Ok(_) | Err(_) => borrow_core::presentation::warning(format!(
+            "Could not release mounts on {}",
+            target.name
+        )),
     }
 
     let script = removal_script(&tag);
     let remote = RemoteCommand::to(&target, "sh".to_string(), vec!["-c".to_string(), script]);
 
     match remote.execute().await {
-        Ok(0) => eprintln!("✓ key removed from {}", target.name),
-        Ok(_) | Err(_) => eprintln!(
-            "! could not reach {}, so the key is still there. remove the line ending {tag} from its ~/.ssh/authorized_keys by hand",
+        Ok(0) => borrow_core::presentation::success(format!("Key removed from {}", target.name)),
+        Ok(_) | Err(_) => borrow_core::presentation::warning(format!(
+            "Could not reach {}, so the key is still there. Remove the line ending {tag} from its ~/.ssh/authorized_keys by hand",
             target.name
-        ),
+        )),
     }
 
     borrow_core::keys::forget_host(&target.host, target.port)?;
     borrow_core::keys::deauthorize(&target.name)?;
-    eprintln!("✓ removed {}'s key from this machine's authorized_keys", target.name);
+    borrow_core::presentation::success(format!(
+        "Removed {}'s key from this machine's authorized_keys",
+        target.name
+    ));
 
     config.remove(&target.name)?;
     let saved = config.save()?;
 
-    eprintln!("✓ forgot {}, saved {}", target.name, saved.display());
+    borrow_core::presentation::success(format!(
+        "Forgot {}, saved {}",
+        target.name,
+        saved.display()
+    ));
 
     Ok(0)
 }

@@ -16,7 +16,7 @@ pub async fn info(agent: Option<String>, refresh: bool) -> anyhow::Result<i32> {
                 client::request(&target.host, target.daemon_port(), Request::Info).await?;
 
             let Response::Info(specs) = response else {
-                anyhow::bail!("the box answered something unexpected");
+                anyhow::bail!("The Agent returned an unexpected response");
             };
 
             let mut updated = target.clone();

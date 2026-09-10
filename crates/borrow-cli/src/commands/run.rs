@@ -1,15 +1,15 @@
 //! `borrow run <cmd>`: run a command on the Agent, in your project, split.
 
+use crate::ssh::RemoteCommand;
 use borrow_core::config::{Agent, Config};
 use borrow_core::mount::{self, Layout};
 use borrow_core::stack;
-use crate::ssh::RemoteCommand;
 
 /// Run `cmd` on the Agent and return its exit code. A non zero code is not an
 /// error: borrow did its job, and the command it ran happened to fail.
 pub async fn run(agent: Option<String>, cmd: Vec<String>) -> anyhow::Result<i32> {
     let Some((program, args)) = cmd.split_first() else {
-        anyhow::bail!("no command given. try borrow run echo hello");
+        anyhow::bail!("No command given. Try borrow run echo hello");
     };
 
     let config = Config::load()?;
@@ -26,7 +26,11 @@ pub async fn run(agent: Option<String>, cmd: Vec<String>) -> anyhow::Result<i32>
         remote.env = placement.env.clone();
     }
 
-    eprintln!("{}", announcement(&target.name, placement.as_ref()));
+    eprintln!(
+        "{}",
+        borrow_core::presentation::Style::stderr()
+            .heading(announcement(&target.name, placement.as_ref()))
+    );
 
     remote.execute().await
 }
@@ -50,7 +54,7 @@ fn place(target: &Agent, here: &std::path::Path) -> anyhow::Result<Option<Placem
 
     let Some((source, keys)) = target.mount_source(&project.root) else {
         anyhow::bail!(
-            "{} was paired before borrow could mount your files. run borrow link again to set up the return direction",
+            "{} was paired before borrow could mount your files. Run borrow link again to set up the return direction",
             target.name
         );
     };
@@ -73,7 +77,7 @@ fn place(target: &Agent, here: &std::path::Path) -> anyhow::Result<Option<Placem
 /// requirement, and in Phase 2 that means saying where the files are too, so the
 /// artifact split is something you can see rather than something you hope for.
 fn announcement(name: &str, placement: Option<&Placement>) -> String {
-    let mut line = format!("▶ running on {name}");
+    let mut line = format!("▶ Running on {name}");
 
     if let Some(placement) = placement {
         line.push_str(&format!(" · {}", placement.layout.source.display()));
@@ -93,7 +97,10 @@ mod tests {
     use std::path::PathBuf;
 
     fn placement(stacks: Vec<Stack>) -> Placement {
-        let project = Project { root: PathBuf::from("/Users/me/app"), stacks };
+        let project = Project {
+            root: PathBuf::from("/Users/me/app"),
+            stacks,
+        };
         let layout = Layout::for_project(&project);
         let rules = mount::rules(&project, &layout);
 
@@ -107,14 +114,14 @@ mod tests {
 
     #[test]
     fn outside_a_project_it_only_says_where() {
-        assert_eq!(announcement("archbox", None), "▶ running on archbox");
+        assert_eq!(announcement("archbox", None), "▶ Running on archbox");
     }
 
     #[test]
     fn inside_a_project_it_says_where_the_files_are_and_what_moved() {
         assert_eq!(
             announcement("archbox", Some(&placement(vec![Stack::Rust]))),
-            "▶ running on archbox · /mnt/borrow/app · target → local disk"
+            "▶ Running on archbox · /mnt/borrow/app · target → local disk"
         );
     }
 
@@ -122,7 +129,7 @@ mod tests {
     fn a_project_with_no_known_stack_still_reports_its_path() {
         assert_eq!(
             announcement("archbox", Some(&placement(Vec::new()))),
-            "▶ running on archbox · /mnt/borrow/app"
+            "▶ Running on archbox · /mnt/borrow/app"
         );
     }
 }

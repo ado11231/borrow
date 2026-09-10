@@ -98,13 +98,13 @@ fn without_host(file: &PathBuf, pattern: &str) -> anyhow::Result<Vec<String>> {
 fn write_lines(file: &PathBuf, lines: &[String]) -> anyhow::Result<()> {
     if let Some(parent) = file.parent() {
         fs::create_dir_all(parent)
-            .with_context(|| format!("could not create {}", parent.display()))?;
+            .with_context(|| format!("Could not create {}", parent.display()))?;
     }
 
     let mut body = lines.join("\n");
     body.push('\n');
 
-    fs::write(file, body).with_context(|| format!("could not write {}", file.display()))
+    fs::write(file, body).with_context(|| format!("Could not write {}", file.display()))
 }
 
 /// Authorize a public key using the same marker that unlink uses to revoke it.
@@ -115,7 +115,7 @@ pub fn authorize(peer: &str, public_key: &str) -> anyhow::Result<PathBuf> {
     let key = authorized_line(peer, public_key)?;
 
     let dir = ssh_dir()?;
-    fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
+    fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
     set_mode(&dir, 0o700)?;
 
     let file = dir.join("authorized_keys");
@@ -131,8 +131,8 @@ pub fn authorize(peer: &str, public_key: &str) -> anyhow::Result<PathBuf> {
     let mut body = lines.join("\n");
     body.push('\n');
 
-    let mut handle = fs::File::create(&file)
-        .with_context(|| format!("could not write {}", file.display()))?;
+    let mut handle =
+        fs::File::create(&file).with_context(|| format!("Could not write {}", file.display()))?;
     handle.write_all(body.as_bytes())?;
     set_mode(&file, 0o600)?;
 
@@ -145,7 +145,7 @@ pub fn set_mode(path: &std::path::Path, mode: u32) -> anyhow::Result<()> {
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(mode))
-            .with_context(|| format!("could not set permissions on {}", path.display()))?;
+            .with_context(|| format!("Could not set permissions on {}", path.display()))?;
     }
 
     let _ = (path, mode);
@@ -154,11 +154,15 @@ pub fn set_mode(path: &std::path::Path, mode: u32) -> anyhow::Result<()> {
 
 /// One authorized_keys line: the key itself, relabelled with our own marker.
 fn authorized_line(peer: &str, public_key: &str) -> anyhow::Result<String> {
-    match public_key.split_whitespace().collect::<Vec<&str>>().as_slice() {
+    match public_key
+        .split_whitespace()
+        .collect::<Vec<&str>>()
+        .as_slice()
+    {
         [kind, material, ..] if kind.starts_with("ssh-") || kind.starts_with("ecdsa-") => {
             Ok(format!("{kind} {material} {}", marker(peer)))
         }
-        _ => anyhow::bail!("that does not look like an ssh public key"),
+        _ => anyhow::bail!("That does not look like an SSH public key"),
     }
 }
 
@@ -181,13 +185,13 @@ pub fn deauthorize(peer: &str) -> anyhow::Result<()> {
     let mut body = kept.join("\n");
     body.push('\n');
 
-    fs::write(&file, body).with_context(|| format!("could not write {}", file.display()))?;
+    fs::write(&file, body).with_context(|| format!("Could not write {}", file.display()))?;
     set_mode(&file, 0o600)
 }
 
 pub fn ssh_dir() -> anyhow::Result<PathBuf> {
     let Some(base) = directories::BaseDirs::new() else {
-        anyhow::bail!("could not determine home directory");
+        anyhow::bail!("Could not determine home directory");
     };
     Ok(base.home_dir().join(".ssh"))
 }
@@ -222,7 +226,10 @@ mod tests {
         let line = authorized_line("archbox", key).unwrap();
 
         assert!(line.ends_with(&marker("archbox")), "line was: {line}");
-        assert!(line.starts_with("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5"), "line was: {line}");
+        assert!(
+            line.starts_with("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5"),
+            "line was: {line}"
+        );
     }
 
     #[test]

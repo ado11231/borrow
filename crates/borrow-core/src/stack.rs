@@ -60,7 +60,10 @@ pub fn find(start: &Path) -> Option<Project> {
 
     loop {
         if is_project_root(dir) {
-            return Some(Project { root: dir.to_path_buf(), stacks: stacks_in(dir) });
+            return Some(Project {
+                root: dir.to_path_buf(),
+                stacks: stacks_in(dir),
+            });
         }
 
         dir = dir.parent()?;

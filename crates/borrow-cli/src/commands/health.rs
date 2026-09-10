@@ -12,7 +12,7 @@ pub async fn health(agent: Option<String>) -> anyhow::Result<i32> {
     let response = client::request(&target.host, target.daemon_port(), Request::Health).await?;
 
     let Response::Health(health) = response else {
-        anyhow::bail!("the box answered something unexpected");
+        anyhow::bail!("The Agent returned an unexpected response");
     };
 
     print(&target.name, &health);
@@ -41,8 +41,14 @@ fn print(name: &str, health: &Health) {
             _ => "vram unknown".to_string(),
         };
 
-        let load = gpu.utilization_percent.map(|u| format!("{u}%")).unwrap_or_default();
-        let temperature = gpu.temperature_c.map(|t| format!("{t}°C")).unwrap_or_default();
+        let load = gpu
+            .utilization_percent
+            .map(|u| format!("{u}%"))
+            .unwrap_or_default();
+        let temperature = gpu
+            .temperature_c
+            .map(|t| format!("{t}°C"))
+            .unwrap_or_default();
 
         println!("  gpu     {} {vram} {load} {temperature}", gpu.name);
     }

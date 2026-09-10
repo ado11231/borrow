@@ -1,5 +1,6 @@
 //! Setup checks with instructions for fixing missing tools and permissions.
 
+use crate::presentation::{Style, Tone};
 use crate::telemetry::is_installed;
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
@@ -25,30 +26,41 @@ pub struct Check {
 
 impl Check {
     pub fn pass(label: impl Into<String>) -> Check {
-        Check { label: label.into(), state: State::Pass, fix: None }
+        Check {
+            label: label.into(),
+            state: State::Pass,
+            fix: None,
+        }
     }
 
     pub fn warn(label: impl Into<String>, fix: impl Into<String>) -> Check {
-        Check { label: label.into(), state: State::Warn, fix: Some(fix.into()) }
+        Check {
+            label: label.into(),
+            state: State::Warn,
+            fix: Some(fix.into()),
+        }
     }
 
     pub fn fail(label: impl Into<String>, fix: impl Into<String>) -> Check {
-        Check { label: label.into(), state: State::Fail, fix: Some(fix.into()) }
+        Check {
+            label: label.into(),
+            state: State::Fail,
+            fix: Some(fix.into()),
+        }
     }
 }
 
 /// Print each check and return true if any check failed.
 pub fn report(checks: &[Check]) -> bool {
     for check in checks {
-        let mark = match check.state {
-            State::Pass => "✓",
-            State::Warn => "!",
-            State::Fail => "✗",
+        let tone = match check.state {
+            State::Pass => Tone::Good,
+            State::Warn => Tone::Warning,
+            State::Fail => Tone::Error,
         };
-
-        match &check.fix {
-            Some(fix) => eprintln!("{mark} {:<34}  →  {fix}", check.label),
-            None => eprintln!("{mark} {}", check.label),
+        eprintln!("{}", Style::stderr().status(&check.label, tone));
+        if let Some(fix) = &check.fix {
+            eprintln!("  Fix: {fix}");
         }
     }
 
@@ -86,7 +98,7 @@ pub fn ssh_server_check() -> Check {
     let addr: SocketAddr = ([127, 0, 0, 1], 22).into();
 
     if is_listening(addr) {
-        return Check::pass("ssh server running");
+        return Check::pass("SSH server running");
     }
 
     let fix = if cfg!(target_os = "macos") {
@@ -95,16 +107,16 @@ pub fn ssh_server_check() -> Check {
         "sudo systemctl enable --now sshd".to_string()
     };
 
-    Check::fail("ssh server not running", fix)
+    Check::fail("SSH server not running", fix)
 }
 
 /// A program that must be present, with the install line for this machine.
 pub fn tool_check(program: &str, state_when_missing: State) -> Check {
     if is_installed(program) {
-        return Check::pass(format!("{program} present"));
+        return Check::pass(format!("Tool available: {program}"));
     }
 
-    let label = format!("{program} not installed");
+    let label = format!("Tool not installed: {program}");
     let fix = install_hint(program);
 
     match state_when_missing {
@@ -147,8 +159,11 @@ pub fn serve_checks() -> Vec<Check> {
     ];
 
     checks.push(match is_installed("nvidia-smi") {
-        true => Check::pass("gpu tooling present"),
-        false => Check::warn("no nvidia-smi, gpu reporting off", "fine if the box has no Nvidia gpu"),
+        true => Check::pass("GPU reporting available"),
+        false => Check::warn(
+            "GPU reporting unavailable",
+            "Optional when no NVIDIA GPU is installed",
+        ),
     });
 
     checks

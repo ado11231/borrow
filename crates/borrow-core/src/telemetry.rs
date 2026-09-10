@@ -2,10 +2,19 @@
 
 use crate::protocol::{Gpu, GpuHealth, Health, Specs};
 use std::process::Command;
-use sysinfo::{Disks, System, MINIMUM_CPU_UPDATE_INTERVAL};
+use sysinfo::{Disks, MINIMUM_CPU_UPDATE_INTERVAL, System};
 
 /// Programs worth knowing about when deciding what the box can do for you.
-const INTERESTING_TOOLS: &[&str] = &["docker", "podman", "sshfs", "rsync", "git", "tmux", "ollama", "nvidia-smi"];
+const INTERESTING_TOOLS: &[&str] = &[
+    "docker",
+    "podman",
+    "sshfs",
+    "rsync",
+    "git",
+    "tmux",
+    "ollama",
+    "nvidia-smi",
+];
 
 const BYTES_PER_MB: u64 = 1024 * 1024;
 

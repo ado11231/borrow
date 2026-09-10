@@ -13,7 +13,7 @@ const KEY_NAME: &str = "borrow_ed25519";
 /// Where ssh keeps keys. The only place in the codebase that knows this.
 fn ssh_dir() -> anyhow::Result<PathBuf> {
     let Some(base) = BaseDirs::new() else {
-        anyhow::bail!("could not determine home directory");
+        anyhow::bail!("Could not determine home directory");
     };
     Ok(base.home_dir().join(".ssh"))
 }
@@ -31,23 +31,35 @@ pub fn ensure(client_name: &str) -> anyhow::Result<(PathBuf, String)> {
 
     if !public.exists() {
         let dir = ssh_dir()?;
-        fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
+        fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
 
-        eprintln!("generating a new ssh key for borrow at {}", private.display());
+        eprintln!("Generating a Borrow SSH key at {}", private.display());
 
         let status = Command::new("ssh-keygen")
-            .args(["-t", "ed25519", "-N", "", "-q", "-C", &marker(client_name), "-f"])
+            .args([
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-q",
+                "-C",
+                &marker(client_name),
+                "-f",
+            ])
             .arg(&private)
             .status()
-            .context("could not run ssh-keygen; check that ssh is installed")?;
+            .context("Could not run ssh-keygen; check that ssh is installed")?;
 
         if !status.success() {
-            anyhow::bail!("ssh-keygen failed while creating {}", private.display());
+            anyhow::bail!(
+                "SSH key generation failed while creating {}",
+                private.display()
+            );
         }
     }
 
     let text = fs::read_to_string(&public)
-        .with_context(|| format!("could not read {}", public.display()))?;
+        .with_context(|| format!("Could not read {}", public.display()))?;
 
     Ok((private, text.trim().to_string()))
 }

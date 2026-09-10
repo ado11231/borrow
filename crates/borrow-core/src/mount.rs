@@ -91,9 +91,7 @@ pub fn env(rules: &[Rule]) -> Vec<(String, String)> {
     rules
         .iter()
         .filter_map(|rule| match rule {
-            Rule::Env { key, value } => {
-                Some((key.to_string(), value.display().to_string()))
-            }
+            Rule::Env { key, value } => Some((key.to_string(), value.display().to_string())),
             Rule::Redirect { .. } => None,
         })
         .collect()
@@ -178,8 +176,9 @@ pub fn ensure_mounted(layout: &Layout, source: &Source, keys: &MountKeys) -> Str
         "mkdir -p {mount}; \
          if mountpoint -q {mount} && ! timeout {STALE_TIMEOUT_SECONDS} ls {mount} >/dev/null 2>&1; \
          then fusermount -u -z {mount} >/dev/null 2>&1 || true; fi; \
-         if ! mountpoint -q {mount}; then {sshfs}; fi"
-    , sshfs = sshfs(layout, source, keys))
+         if ! mountpoint -q {mount}; then {sshfs}; fi",
+        sshfs = sshfs(layout, source, keys)
+    )
 }
 
 /// Create artifact folders and links without replacing existing project directories.
@@ -228,7 +227,10 @@ mod tests {
     use super::*;
 
     fn project(stacks: Vec<Stack>) -> Project {
-        Project { root: PathBuf::from("/Users/me/projects/app"), stacks }
+        Project {
+            root: PathBuf::from("/Users/me/projects/app"),
+            stacks,
+        }
     }
 
     fn layout_for(project: &Project) -> Layout {
@@ -241,7 +243,10 @@ mod tests {
 
         assert_eq!(layout.name, "app");
         assert_eq!(layout.source, PathBuf::from("/mnt/borrow/app"));
-        assert_eq!(layout.artifacts, PathBuf::from("/var/lib/borrow/builds/app"));
+        assert_eq!(
+            layout.artifacts,
+            PathBuf::from("/var/lib/borrow/builds/app")
+        );
     }
 
     #[test]
@@ -268,7 +273,10 @@ mod tests {
         assert!(env(&rules).is_empty());
         assert_eq!(
             redirects(&rules),
-            vec![("node_modules", Path::new("/var/lib/borrow/builds/app/node_modules"))]
+            vec![(
+                "node_modules",
+                Path::new("/var/lib/borrow/builds/app/node_modules")
+            )]
         );
     }
 
@@ -328,7 +336,10 @@ mod tests {
         let project = project(vec![Stack::Rust, Stack::Node]);
         let rules = rules(&project, &layout_for(&project));
 
-        assert_eq!(summary(&rules), Some("target, node_modules → local disk".to_string()));
+        assert_eq!(
+            summary(&rules),
+            Some("target, node_modules → local disk".to_string())
+        );
     }
 
     fn source() -> Source {
@@ -351,7 +362,10 @@ mod tests {
     fn the_mount_pulls_from_the_client() {
         let line = ensure_mounted(&layout_for(&project(vec![Stack::Rust])), &source(), &keys());
 
-        assert!(line.contains("me@100.64.0.2:/Users/me/projects/app"), "line was: {line}");
+        assert!(
+            line.contains("me@100.64.0.2:/Users/me/projects/app"),
+            "line was: {line}"
+        );
         assert!(line.contains("/mnt/borrow/app"), "line was: {line}");
     }
 
@@ -359,12 +373,18 @@ mod tests {
     fn the_mount_uses_borrows_own_key_and_known_hosts() {
         let line = ensure_mounted(&layout_for(&project(vec![Stack::Rust])), &source(), &keys());
 
-        assert!(line.contains("IdentityFile=/home/ado/.ssh/borrow_mount_ed25519"), "line was: {line}");
+        assert!(
+            line.contains("IdentityFile=/home/ado/.ssh/borrow_mount_ed25519"),
+            "line was: {line}"
+        );
         assert!(
             line.contains("UserKnownHostsFile=/home/ado/.config/borrow/known_hosts"),
             "line was: {line}"
         );
-        assert!(line.contains("StrictHostKeyChecking=yes"), "line was: {line}");
+        assert!(
+            line.contains("StrictHostKeyChecking=yes"),
+            "line was: {line}"
+        );
     }
 
     /// A healthy mount must survive. Remounting on every command would drop the
@@ -401,7 +421,10 @@ mod tests {
         let layout = layout_for(&project);
         let line = prepare(&layout, &rules(&project, &layout));
 
-        assert!(line.contains("mkdir -p /var/lib/borrow/builds/app/target"), "line was: {line}");
+        assert!(
+            line.contains("mkdir -p /var/lib/borrow/builds/app/target"),
+            "line was: {line}"
+        );
     }
 
     /// The mount is the user's real project directory, so a link is only ever added
@@ -425,6 +448,9 @@ mod tests {
 
         let line = ensure_mounted(&layout_for(&project(vec![Stack::Rust])), &source, &keys());
 
-        assert!(line.contains("'me@100.64.0.2:/Users/me/my projects/app'"), "line was: {line}");
+        assert!(
+            line.contains("'me@100.64.0.2:/Users/me/my projects/app'"),
+            "line was: {line}"
+        );
     }
 }

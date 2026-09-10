@@ -1,7 +1,7 @@
 //! Where the Client remembers which Agent to talk to.
 
 use crate::mount;
-use crate::protocol::{Specs, DEFAULT_PORT};
+use crate::protocol::{DEFAULT_PORT, Specs};
 use anyhow::Context;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
@@ -10,9 +10,9 @@ use std::path::PathBuf;
 
 /// Shown whenever there is no box to talk to. Names the two commands that fix it,
 /// because a stranger has no config file to look at yet.
-const NO_AGENTS: &str = "no agent configured yet\n\n\
-                         on the box:      borrow serve\n\
-                         on this machine: borrow link <code>";
+const NO_AGENTS: &str = "No Agent configured yet\n\n\
+                         On the Agent:   borrow serve\n\
+                         On the Client:  borrow link <code>";
 
 /// The whole config file. `agents` is a list so it renders as readable `[[agents]]`
 /// blocks for anyone who opens the file and edits it by hand.
@@ -63,7 +63,10 @@ impl Agent {
     /// Where the Agent should pull a local directory from, and what it needs in
     /// order to do so. `None` means this box was paired before the mount existed,
     /// which is a thing `link` can fix rather than an error to explain.
-    pub fn mount_source(&self, path: &std::path::Path) -> Option<(mount::Source, mount::MountKeys)> {
+    pub fn mount_source(
+        &self,
+        path: &std::path::Path,
+    ) -> Option<(mount::Source, mount::MountKeys)> {
         let source = mount::Source {
             user: self.mount_user.clone()?,
             host: self.mount_host.clone()?,
@@ -123,15 +126,12 @@ impl Config {
     fn find(&self, name: &str) -> anyhow::Result<&Agent> {
         let names: Vec<&str> = self.agents.iter().map(|a| a.name.as_str()).collect();
 
-        self.agents
-            .iter()
-            .find(|a| a.name == name)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "no agent named '{name}'. configured agents: {}",
-                    names.join(", ")
-                )
-            })
+        self.agents.iter().find(|a| a.name == name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "No Agent named '{name}'. Configured Agents: {}",
+                names.join(", ")
+            )
+        })
     }
 
     /// Pick the agent to use. An explicit `--agent` wins, then `default`, then the
@@ -146,8 +146,8 @@ impl Config {
                 _ => {
                     let names: Vec<&str> = self.agents.iter().map(|a| a.name.as_str()).collect();
                     anyhow::bail!(
-                        "several agents configured: {}\n\n\
-                         pass --agent <name>, or set default = \"<name>\" in {}",
+                        "Several Agents configured: {}\n\n\
+                         Pass --agent <name>, or set default = \"<name>\" in {}",
                         names.join(", "),
                         path()?.display()
                     )
@@ -161,7 +161,10 @@ impl Config {
     pub fn load_or_empty() -> anyhow::Result<Config> {
         match path()?.exists() {
             true => Config::load(),
-            false => Ok(Config { default: None, agents: Vec::new() }),
+            false => Ok(Config {
+                default: None,
+                agents: Vec::new(),
+            }),
         }
     }
 
@@ -181,7 +184,7 @@ impl Config {
     /// config never names an agent that is not there.
     pub fn remove(&mut self, name: &str) -> anyhow::Result<Agent> {
         let Some(index) = self.agents.iter().position(|a| a.name == name) else {
-            anyhow::bail!("no agent named '{name}'");
+            anyhow::bail!("No Agent named '{name}'");
         };
 
         if self.default.as_deref() == Some(name) {
@@ -197,11 +200,11 @@ impl Config {
 
         if let Some(parent) = file.parent() {
             fs::create_dir_all(parent)
-                .with_context(|| format!("could not create {}", parent.display()))?;
+                .with_context(|| format!("Could not create {}", parent.display()))?;
         }
 
-        let body = toml::to_string_pretty(self).context("could not encode the config")?;
-        fs::write(&file, body).with_context(|| format!("could not write {}", file.display()))?;
+        let body = toml::to_string_pretty(self).context("Could not encode the config")?;
+        fs::write(&file, body).with_context(|| format!("Could not write {}", file.display()))?;
 
         Ok(file)
     }
@@ -243,7 +246,10 @@ mod tests {
 
     #[test]
     fn explicit_request_beats_the_default() {
-        assert_eq!(config(TWO).resolve(Some("archbox")).unwrap().name, "archbox");
+        assert_eq!(
+            config(TWO).resolve(Some("archbox")).unwrap().name,
+            "archbox"
+        );
     }
 
     #[test]
@@ -382,7 +388,10 @@ mod tests {
         let text = toml::to_string_pretty(&config).expect("config should encode");
         let back: Config = toml::from_str(&text).expect("config should decode");
 
-        assert_eq!(back.agents[0].specs.as_ref().unwrap().gpus[0].name, "RTX 3070");
+        assert_eq!(
+            back.agents[0].specs.as_ref().unwrap().gpus[0].name,
+            "RTX 3070"
+        );
         assert_eq!(back.agents[0].daemon_port(), 7433);
     }
 
@@ -404,7 +413,11 @@ mod tests {
     /// so plainly is better than a mount that fails in the shell with no context.
     #[test]
     fn a_box_paired_before_the_mount_existed_has_no_source() {
-        assert!(agent("archbox").mount_source(std::path::Path::new("/Users/me/app")).is_none());
+        assert!(
+            agent("archbox")
+                .mount_source(std::path::Path::new("/Users/me/app"))
+                .is_none()
+        );
     }
 
     #[test]
@@ -415,11 +428,15 @@ mod tests {
         agent.mount_identity_file = Some("/home/ado/.ssh/borrow_mount_ed25519".to_string());
         agent.mount_known_hosts = Some("/home/ado/.config/borrow/known_hosts".to_string());
 
-        let (source, keys) =
-            agent.mount_source(std::path::Path::new("/Users/me/app")).unwrap();
+        let (source, keys) = agent
+            .mount_source(std::path::Path::new("/Users/me/app"))
+            .unwrap();
 
         assert_eq!(source.host, "100.64.0.2");
         assert_eq!(source.path, PathBuf::from("/Users/me/app"));
-        assert_eq!(keys.identity_file, PathBuf::from("/home/ado/.ssh/borrow_mount_ed25519"));
+        assert_eq!(
+            keys.identity_file,
+            PathBuf::from("/home/ado/.ssh/borrow_mount_ed25519")
+        );
     }
 }

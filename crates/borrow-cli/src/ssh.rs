@@ -1,7 +1,7 @@
 //! Building and running commands on the Agent over ssh.
 
-use borrow_core::config;
 use anyhow::Context;
+use borrow_core::config;
 use shell_words::{join, quote};
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -81,8 +81,7 @@ impl RemoteCommand {
     /// Join setup steps with && so failure prevents command execution.
     pub fn command_line(&self) -> String {
         let user_command = join(
-            std::iter::once(self.program.as_str())
-                .chain(self.args.iter().map(|s| s.as_str())),
+            std::iter::once(self.program.as_str()).chain(self.args.iter().map(|s| s.as_str())),
         );
 
         let mut parts = self.setup.clone();
@@ -156,7 +155,7 @@ impl RemoteCommand {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .context("could not spawn ssh; check that it is installed and on PATH")?;
+            .context("Could not spawn ssh; check that it is installed and on PATH")?;
 
         let stdout = child.stdout.take().context("ssh stdout was not captured")?;
         let stderr = child.stderr.take().context("ssh stderr was not captured")?;
@@ -183,7 +182,7 @@ impl RemoteCommand {
                 },
                 _ = &mut interrupt, if !interrupted => {
                     interrupted = true;
-                    child.start_kill().context("could not signal the ssh process")?;
+                    child.start_kill().context("Could not signal the ssh process")?;
                 }
             }
         }
@@ -197,7 +196,7 @@ impl RemoteCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     fn remote(args: &[&str]) -> RemoteCommand {
         RemoteCommand {
             host: "localbox".to_string(),
@@ -261,9 +260,18 @@ mod tests {
 
         let argv = command.to_ssh_args();
 
-        assert!(argv.contains(&"me@localbox".to_string()), "argv was: {argv:?}");
-        assert!(argv.windows(2).any(|w| w == ["-p", "2222"]), "argv was: {argv:?}");
-        assert!(argv.windows(2).any(|w| w == ["-i", "/keys/borrow"]), "argv was: {argv:?}");
+        assert!(
+            argv.contains(&"me@localbox".to_string()),
+            "argv was: {argv:?}"
+        );
+        assert!(
+            argv.windows(2).any(|w| w == ["-p", "2222"]),
+            "argv was: {argv:?}"
+        );
+        assert!(
+            argv.windows(2).any(|w| w == ["-i", "/keys/borrow"]),
+            "argv was: {argv:?}"
+        );
         assert!(
             argv.contains(&"UserKnownHostsFile=\"/keys/known_hosts\"".to_string()),
             "argv was: {argv:?}"
@@ -275,7 +283,10 @@ mod tests {
     fn ssh_is_told_to_keep_quiet_about_itself() {
         let argv = remote(&["hi"]).to_ssh_args();
 
-        assert!(argv.contains(&"LogLevel=ERROR".to_string()), "argv was: {argv:?}");
+        assert!(
+            argv.contains(&"LogLevel=ERROR".to_string()),
+            "argv was: {argv:?}"
+        );
     }
 
     #[test]
@@ -324,7 +335,10 @@ mod tests {
     #[test]
     fn split_variables_are_put_in_front_of_the_command() {
         let mut command = remote(&["hi"]);
-        command.env = vec![("CARGO_TARGET_DIR".to_string(), "/var/lib/b/target".to_string())];
+        command.env = vec![(
+            "CARGO_TARGET_DIR".to_string(),
+            "/var/lib/b/target".to_string(),
+        )];
 
         assert_eq!(
             command.command_line(),
@@ -340,7 +354,10 @@ mod tests {
         command.setup = vec!["mount_it".to_string()];
         command.cwd = Some("/mnt/borrow/app".to_string());
 
-        assert_eq!(command.command_line(), "mount_it && cd /mnt/borrow/app && echo hi");
+        assert_eq!(
+            command.command_line(),
+            "mount_it && cd /mnt/borrow/app && echo hi"
+        );
     }
 
     #[test]

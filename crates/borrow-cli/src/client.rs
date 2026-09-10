@@ -1,7 +1,7 @@
 //! Client requests to the Agent. Each connection exchanges one JSON request and response.
 
-use borrow_core::protocol::{Request, Response};
 use anyhow::Context;
+use borrow_core::protocol::{Request, Response};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
@@ -10,21 +10,24 @@ use tokio::net::TcpStream;
 pub async fn request(host: &str, port: u16, message: Request) -> anyhow::Result<Response> {
     let mut stream = TcpStream::connect((host, port))
         .await
-        .with_context(|| format!("could not reach the borrow daemon at {host}:{port}"))?;
+        .with_context(|| format!("Could not reach the borrow daemon at {host}:{port}"))?;
 
-    let mut line = serde_json::to_string(&message).context("could not encode the request")?;
+    let mut line = serde_json::to_string(&message).context("Could not encode the request")?;
     line.push('\n');
 
-    stream.write_all(line.as_bytes()).await.context("could not send the request")?;
+    stream
+        .write_all(line.as_bytes())
+        .await
+        .context("Could not send the request")?;
 
     let mut reply = String::new();
     BufReader::new(&mut stream)
         .read_line(&mut reply)
         .await
-        .context("the daemon closed the connection without answering")?;
+        .context("The Agent closed the connection without answering")?;
 
     let response: Response =
-        serde_json::from_str(reply.trim()).context("could not understand the daemon's answer")?;
+        serde_json::from_str(reply.trim()).context("Could not understand the daemon's answer")?;
 
     match response {
         Response::Error { message } => anyhow::bail!("{message}"),

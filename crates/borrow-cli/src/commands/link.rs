@@ -1,8 +1,8 @@
 //! `borrow link <code>`: pair with a box and remember it.
 
 use crate::client;
-use borrow_core::config::{Agent, Config};
 use crate::keys;
+use borrow_core::config::{Agent, Config};
 use borrow_core::keys as core_keys;
 use borrow_core::preflight::{self, Check};
 use borrow_core::protocol::{Request, Response};
@@ -17,15 +17,15 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
         match preflight::is_listening(format!("{host}:{port}").parse()?) {
             true => Check::pass(format!("{host} is reachable")),
             false => Check::fail(
-                format!("nothing answering at {host}:{port}"),
-                "run borrow serve on the other machine".to_string(),
+                format!("No response at {host}:{port}"),
+                "Run borrow serve on the other machine".to_string(),
             ),
         },
         preflight::ssh_server_check(),
     ];
 
     if preflight::report(&checks) {
-        anyhow::bail!("pairing stopped");
+        anyhow::bail!("Pairing stopped");
     }
 
     let (private_key, public_key) = keys::ensure(&client_name)?;
@@ -44,7 +44,7 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
     .await?;
 
     let Response::Paired(paired) = response else {
-        anyhow::bail!("the box answered something unexpected while pairing");
+        anyhow::bail!("The Agent returned an unexpected response while pairing");
     };
 
     let name = name.unwrap_or(paired.name.clone());
@@ -70,17 +70,30 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
     let saved = config.save()?;
 
     eprintln!();
-    eprintln!("✓ paired with {name}");
-    eprintln!("  key       {}", private_key.display());
-    eprintln!("  installed {}@{}:~/.ssh/authorized_keys", paired.user, host);
-    eprintln!("  host keys {} ({} learned)", known_hosts.display(), paired.host_keys.len());
-    eprintln!("  saved     {}", saved.display());
+    borrow_core::presentation::success(format!("Paired with {name}"));
+    borrow_core::presentation::detail("Key", private_key.display());
+    borrow_core::presentation::detail(
+        "Installed",
+        format!("{}@{}:~/.ssh/authorized_keys", paired.user, host),
+    );
+    borrow_core::presentation::detail(
+        "Host keys",
+        format!(
+            "{} ({} learned)",
+            known_hosts.display(),
+            paired.host_keys.len()
+        ),
+    );
+    borrow_core::presentation::detail("Saved", saved.display());
     eprintln!();
-    eprintln!("  and back the other way, so {name} can mount your files:");
-    eprintln!("  authorized {}", authorized.display());
-    eprintln!("  mounts from {}@{}", this_user(), paired.client_address);
+    eprintln!("  Return connection so {name} can mount your files:");
+    borrow_core::presentation::detail("Authorized", authorized.display());
+    borrow_core::presentation::detail(
+        "Mount source",
+        format!("{}@{}", this_user(), paired.client_address),
+    );
     eprintln!();
-    eprintln!("  try it:   borrow run uname -a");
+    eprintln!("  Try it:   borrow run uname -a");
     eprintln!();
 
     Ok(0)
@@ -92,7 +105,7 @@ fn parse_code(code: &str) -> anyhow::Result<(String, u16, String)> {
     let parts: Vec<&str> = code.trim().split(':').collect();
 
     let [host, port, token] = parts.as_slice() else {
-        anyhow::bail!("that does not look like a pairing code. expected host:port:code");
+        anyhow::bail!("That does not look like a pairing code. Expected host:port:code");
     };
 
     let port: u16 = port
@@ -140,7 +153,9 @@ mod tests {
 
     #[test]
     fn a_port_that_is_not_a_number_is_reported() {
-        let err = parse_code("10.0.0.4:door:ABCD2345").unwrap_err().to_string();
+        let err = parse_code("10.0.0.4:door:ABCD2345")
+            .unwrap_err()
+            .to_string();
 
         assert!(err.contains("door"), "message was: {err}");
     }
