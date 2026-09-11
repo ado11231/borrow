@@ -114,9 +114,26 @@ pub fn detail(label: &str, value: impl std::fmt::Display) {
     eprint!("{}", Style::stderr().row(label, value));
 }
 
+/// Protocol memory fields contain MiB despite their historical mb names.
+pub fn capacity(mib: u64) -> String {
+    if mib < 1024 {
+        format!("{:.1} MiB", mib as f64)
+    } else {
+        format!("{:.1} GiB", mib as f64 / 1024.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capacity_preserves_small_values_and_fractional_gib() {
+        assert_eq!(capacity(0), "0.0 MiB");
+        assert_eq!(capacity(512), "512.0 MiB");
+        assert_eq!(capacity(1024), "1.0 GiB");
+        assert_eq!(capacity(1536), "1.5 GiB");
+    }
 
     #[test]
     fn automatic_color_requires_a_suitable_terminal() {
