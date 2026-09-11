@@ -1,114 +1,54 @@
-# borrow
+# Borrow
 
-Run heavy work on another machine, from a light one.
+## How to run
 
-Stay in your normal environment, meaning your editor, terminal, and browser, but run the
-heavy parts of development on a stronger box. Builds, servers, databases, containers, and
-models all go somewhere else. Your files stay where they are. No VM, and no remote desktop.
+Use two computers on the same network. Install Rust on both and enable SSH access on both. The Agent also needs SSHFS.
 
-```bash
-$ borrow run cargo build
-▶ running on archbox
-   Compiling borrow v0.1.0
-    Finished dev profile in 2.04s
+From the Borrow repository on each computer:
+
+```sh
+cargo build
+export PATH="$PWD/target/debug:$PATH"
 ```
 
-## Quick start
+Start Borrow on the Agent:
 
-On the machine with the resources:
-
-```bash
-$ borrow serve
-✓ ssh server running
-✓ sshfs present
-✓ rsync present
-
-borrow is serving archbox
-
-  on the other machine, run:
-
-      borrow link 10.0.0.19:7433:K7QW9ZR2
+```sh
+borrow serve
 ```
 
-On the machine you work from, paste that command:
+Follow any setup instructions it prints. Keep it running.
 
-```bash
-$ borrow link 10.0.0.19:7433:K7QW9ZR2
-✓ paired with archbox
-  key       ~/.ssh/borrow_ed25519
-  installed ado@10.0.0.19:~/.ssh/authorized_keys
-  host keys ~/.config/borrow/known_hosts (3 learned)
+On the Client, use the pairing code printed by the Agent:
+
+```sh
+borrow link <code>
 ```
 
-That is the whole setup. No ssh config to edit, no keys to paste.
+Then open your project folder and run:
+
+```sh
+borrow run cargo build
+```
 
 ## Commands
 
-| Command | What it does |
-| --- | --- |
-| `borrow serve` | Agent: start the daemon and print a pairing code |
-| `borrow link <code>` | Client: pair with a box and remember it |
-| `borrow run <cmd>` | Run a command on the box and stream the output back |
-| `borrow info` | What the box is: cpu, memory, disk, gpu, tooling |
-| `borrow health` | What the box is doing right now |
-| `borrow unlink` | Remove borrow's key from the box and forget it |
+1. `borrow serve` starts the Agent.
+2. `borrow link <code>` pairs the computers.
+3. `borrow run <command>` runs work on the Agent.
+4. `borrow info` shows machine specifications.
+5. `borrow health` shows current resource use.
+6. `borrow unlink` removes the pairing.
+7. `borrow help` shows command help.
 
-Add `--agent <name>` to pick a box when you have more than one.
+## Phases
 
-## How it works
-
-Two machines. The **Client** is where you type, and it stays light. The **Agent** is where
-the resources are, and it does the work.
-
-A small daemon on the Agent owns identity, pairing, and health. Execution itself rides on
-ssh, so there is no new protocol to trust and no custom execution channel to audit.
-
-Your source will stay on the Client and be mounted onto the Agent. Build artifacts such as
-`target/` and `node_modules/` live on the Agent's local disk, because mounting those is what
-makes remote development slow. Every remote command says where it ran.
-
-## Security
-
-borrow installs an ssh key on somebody's personal desktop, so the rules are strict.
-
-* Pairing codes are single use and expire in ten minutes. They are printed once, to the
-  owner's own console, and never written to a file or logged.
-* borrow uses its own named key rather than your personal one, so you can find it in
-  `authorized_keys` and `borrow unlink` can take it back out.
-* The daemon binds to loopback plus your local network. Never `0.0.0.0`.
-* Private keys are never copied between machines.
-* Remote arguments are quoted, never concatenated into a shell. There are tests for that.
-* The box's ssh host keys travel over the pairing exchange, so the first connection is
-  trusted without anybody being asked to eyeball a fingerprint.
-
-## Status
-
-**Phase 1 is complete.** Pair two machines on a LAN, run commands on the box with live
-output and real exit codes, and see what the box is and what it is doing.
-
-Not there yet: there is no mount, so commands run in the login directory on the box rather
-than in your project. That is Phase 2 and it is the next thing being built. Cross network
-use arrives in Phase 4. Until then both machines need to be on the same network.
-
-## Building
-
-```bash
-cargo build
-cargo test
-cargo install --path crates/borrow-cli    # puts `borrow` on your PATH
-```
-
-The repo is a Cargo workspace: `borrow-core` and `borrow-agent` are libraries, and
-`borrow-cli` produces the single `borrow` binary that both machines install.
-
-Requires a Rust toolchain on both machines, and an ssh server on the Agent.
-
-## Documentation
-
-`docs/GUIDE.md` is the full reference: architecture, design decisions, the security model,
-the phase roadmap, and the machine setup. `CLAUDE.md` is the rulebook for AI coding agents
-working in this repo.
-
-## License
-
-TBD
+1. Setup and Phase 0: Complete. Prepared the machines and tested the idea.
+2. Phase 1: Complete. Pairing, remote commands, information, and health.
+3. Phase 2: Main implementation present. Project mounting and local build output still need full testing on two machines.
+4. Current cleanup: Comments, CLI formatting, health colors, and documentation.
+5. Phase 3: Planned. Persistent sessions and job management.
+6. Phase 4: Planned. Connections across networks.
+7. Phase 5: Planned. Notifications and port forwarding.
+8. Phase 6: Planned. Model workloads and broader platform support.
+9. Phase 7: Planned. Installers and public releases.

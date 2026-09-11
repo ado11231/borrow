@@ -39,7 +39,7 @@ them over a mount. It has to feel local. **No VM, and no remote desktop.**
 1. **The Client stays light.** Never move heavy work onto the Client. If a change makes the
    Client do real work, the change is wrong.
 2. **Always report where things run.** Every remotely executed command must clearly print
-   its location, for example `▶ running on archbox`. This is a hard requirement and not
+   its location, for example `▶ Running on archbox`. This is a hard requirement and not
    cosmetic.
 3. **Do not rebuild existing systems.** We wrap `ssh`, `sshfs` or NFS, `docker`, `ollama`,
    and `nvidia-smi`. Do not write a custom SSH, filesystem, container engine, or inference
@@ -107,7 +107,7 @@ detail is in `docs/GUIDE.md`.
 
 ```
 crates/
-├── borrow-core/     lib: protocol, config, telemetry, preflight, keys::marker
+├── borrow-core/     lib: shared config, protocol, mounts, telemetry, presentation
 ├── borrow-agent/    lib: the daemon
 └── borrow-cli/      bin `borrow`: ssh, client, keys, commands/
 ```
@@ -178,39 +178,31 @@ Each phase must leave a working, usable tool. Phase 4 gates publishing, because 
 
 ## Current state
 
-**Phase 1 is complete. Phase 2 is the current phase.**
+**Phase 1 is complete. Phase 2 has its main implementation and needs acceptance testing.**
 
-Phase 1 works on a LAN: `serve` with preflight checks and a single use pairing code, `link`
-which installs borrow's own named key and learns the box's host keys, `run` with live
-streaming, real exit codes and a ctrl-c that stops the remote command, `info` from cache or
-refreshed, `health` live, `unlink`, and `--agent` selection. 29 tests.
+The workspace has three crates and one executable. Pairing establishes both SSH trust
+directions. Project detection, SSHFS setup, stale mount checks, artifact rules, and
+mounted execution are implemented. Neither private key moves between machines.
 
-**Phase 2 is the mount and the artifact split**, and it is what makes the tool worth using.
-In order: split the workspace, then `stack.rs` detection, then `mount.rs` split rules, then
-the reverse trust, then the SSHFS mount, then wire it into `run`. The first three need no
-second machine and are fully unit testable.
+CLI output uses shared formatting in `borrow-core/src/presentation.rs`. Messages use
+sentence capitalization. CPU, RAM, GPU, and VRAM labels use uppercase. Colors have text
+labels and respect terminal detection. Global `--color auto|always|never` controls
+Borrow output. Put Borrow options before `run`; later arguments belong to the remote
+command.
 
-Three things to know before starting Phase 2:
+Health remains a single snapshot. Sessions, process records, `ps`, `stop`, and
+continuous displays are Phase 3 work.
 
-* **`cwd` and `env` on `RemoteCommand` are the waiting slots.** They will carry the mounted
-  project path and the artifact split variables. `command_line` will need to emit
-  `cd <cwd> && env KEY=VAL ... <command>`, with every piece quoted by the same
-  `shell_words` path that already protects the arguments.
-* **SSHFS is a pull, so the mount runs on the Agent and connects back to the Client.** That
-  is the reverse of every connection borrow makes today. Phase 1 `link` installs the
-  Client's key on the Agent. Phase 2 needs the mirror image as well: the Agent's public key
-  on the Client, and the Client's host key known to the Agent. Two independent one way
-  trusts, and neither private key is ever copied.
-* **The Client sshd preflight warning becomes a failure.** `link` already warns when this
-  machine has no ssh server. In Phase 2 there is no mount without one.
+The current suite contains 88 passing tests. Real machine mount performance, sleep
+recovery, watcher behavior, and existing Node and Python directory handling still need
+acceptance testing. `borrow.toml` marks a project but its settings are not applied yet.
 
-One deviation from `docs/GUIDE.md` worth knowing: `link` does not write a `~/.ssh/config`
-entry. Everything ssh needs lives in borrow's own config and is passed on the command line
-instead, so borrow never edits files you maintain by hand.
+`link` stores SSH options in Borrow configuration instead of editing `~/.ssh/config`.
+The detailed file reference and completion record live in `docs/PROJECT_STATUS.md`.
 
 ## Conventions
 
-* **Errors.** `anyhow` in the binaries, `thiserror` in `borrow-core`. A non zero remote exit
+* **Errors.** The current crates use `anyhow`. Typed shared errors remain a future improvement. A non zero remote exit
   code is not an error. borrow did its job and the command it ran happened to fail.
 * **Async.** `tokio`. The tool is concurrent by nature, handling connections, streaming, and
   watching processes, so expect async everywhere past Phase 1.
@@ -218,7 +210,8 @@ instead, so borrow never edits files you maintain by hand.
 * **Logging.** `tracing`.
 * **CLI.** `clap`.
 * **Telemetry.** `sysinfo` for CPU, RAM, and disk. `nvidia-smi` or `nvml-wrapper` for GPU.
-* **Comments.** Doc comments above items only. Keep function bodies free of comments.
+* **Comments.** Keep necessary doc comments above items. Explain important decisions in plain language.
+  Avoid em dashes and comments that repeat obvious code. Keep function bodies free of comments.
 * **Versions.** Always check the current version on crates.io. Never assume.
 
 ---

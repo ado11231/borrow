@@ -39,7 +39,7 @@ never move.
 
 ```bash
 borrow run cargo build
-▶ running on archbox
+▶ Running on archbox
    Compiling ...
 ```
 
@@ -221,7 +221,7 @@ Walk through `borrow run cargo build` end to end.
 4. The Agent runs the command inside the mounted project directory, with build output going
    to Agent local disk.
 5. stdout and stderr stream back over the ssh pipe as they are produced.
-6. The Client prints `▶ running on archbox`, then the live output, then propagates the exit
+6. The Client prints `▶ Running on archbox`, then the live output, then propagates the exit
    code.
 
 Step 6 has two details that are easy to get wrong and important to get right. Output must
@@ -276,6 +276,33 @@ did.
 
 A small per project `borrow.toml` exists only for the cases where detection gets it wrong.
 
+## Terminal output
+
+Borrow uses compact aligned rows. Labels and sentences are capitalized consistently.
+CPU, RAM, GPU, and VRAM stay uppercase. Machine names, paths, and commands keep their
+original spelling.
+
+`--color auto|always|never` is a global option. Place it before `run` so it is not
+forwarded to the remote program. Automatic mode checks each output stream separately
+and disables colors for redirected output, a nonempty `NO_COLOR`, or `TERM=dumb`.
+An explicit mode overrides those automatic choices. Help follows the same color choice.
+
+Information and health results go to stdout. Progress, setup checks, and errors go to
+stderr. Borrow does not change remote command output.
+
+Health colors always include written status labels:
+
+1. CPU and GPU usage: Light below 70 percent, Busy from 70 percent, High load from 90 percent.
+2. RAM and VRAM usage: Available below 75 percent, Limited from 75 percent, Low free memory
+   from 90 percent.
+3. GPU temperature: Normal below 75°C, Warm from 75°C, Hot from 85°C. These are display
+   guides, not device safety limits.
+4. Disk: available space only. The health response does not provide live total capacity.
+
+The three levels use green, yellow, and red. Missing or invalid measurements are
+Unavailable. Memory uses MiB and GiB with one decimal place. High utilization describes
+workload, not a failing machine. No automatic resource gate is added in this cleanup.
+
 ## Seeing the box: specs and health
 
 You are offloading work to a machine you cannot see, so "is it alive, and does it have room
@@ -286,18 +313,17 @@ daemon.
   model and VRAM, disk space, OS and kernel, and what tooling is available such as CUDA,
   ROCm, Docker, or a running Ollama. Fetched once at pairing time and cached on the Client.
 * **Health, which is live.** What the box *is doing now*: CPU load, RAM used and free, VRAM
-  used and free, free disk, GPU temperature and utilization, and which borrow jobs are
-  running. Polled every second or two while attached.
+  used and free, free disk, GPU temperature and utilization. Today this is a single
+  snapshot. Job records and continuous updates belong to Phase 3.
 
 ```bash
 borrow info     # static specs, instant, from cache
 borrow health   # live snapshot right now
-borrow top      # continuously updating view, like htop but remote
+borrow top      # planned for Phase 3
 ```
 
 Collection is deliberately cheap and reuses existing tools. CPU, RAM, and disk come from
-the `sysinfo` crate. Nvidia GPU data comes from shelling out to `nvidia-smi`, or from
-`nvml-wrapper` when structured data is wanted. Running jobs come from the daemon's own
+the `sysinfo` crate. NVIDIA GPU data currently comes from `nvidia-smi`. Running jobs come from the daemon's own
 process table once Phase 3 exists.
 
 This data becomes more than a readout in two places. First, a **preflight check** before a
@@ -434,7 +460,7 @@ reserved for borrow itself failing. Getting this boundary right is what makes th
 compose properly in scripts.
 
 `main` mirrors that split when it exits. `Ok(code)` becomes the process exit code, while
-`Err(e)` prints `borrow: {e:#}` and exits 1. The `{e:#}` is the alternate Display format
+`Err(e)` prints `Error: {e:#}` to stderr and exits 1. The `{e:#}` is the alternate Display format
 for an `anyhow::Error`, which renders the whole context chain on one line rather than only
 the outermost message.
 
@@ -635,45 +661,38 @@ borrow top              # live continuously updating view
 
 ## Where things stand today
 
-**Status: Phase 1 is complete. The tool is usable on a LAN.** Pair two machines, run
-commands on the box with live output, and look at what the box is and what it is doing.
+Phase 1 is complete. Phase 2 has its main implementation and still needs acceptance
+testing on two machines. The current cleanup improves comments, terminal output,
+health displays, and documentation before Phase 3.
 
-What exists and works, all of it verified by running it rather than by reading it:
+Implemented today:
 
-* `borrow serve`, which runs preflight checks, prints a single use pairing code, and
-  listens on loopback plus the machine's real addresses. Never on `0.0.0.0`.
-* `borrow link <code>`, which generates borrow's own ssh key if there is not one, installs
-  it on the box, learns the box's ssh host keys, caches its specs, and saves all of it.
-* `borrow run <cmd>`, which streams stdout and stderr live, propagates the real exit code,
-  and stops the remote command on ctrl-c.
-* `borrow info` from the cache and `borrow info --refresh` from the box.
-* `borrow health` for a live snapshot of cpu, memory, disk, and gpu.
-* `borrow unlink`, which takes the key back off the box and forgets it.
-* `--agent` for picking a box, with sensible resolution when there is only one.
-* 29 tests covering quoting and injection, ssh argument building, pairing code parsing,
-  agent resolution, and the config round trip.
+1. `serve` performs setup checks and prints a single use pairing code.
+2. `link` sets up SSH trust in both directions and remembers the Agent.
+3. `run` finds the project, prepares its mount and artifact split, and executes over SSH.
+4. `info` shows cached specifications, with `--refresh` for a fresh request.
+5. `health` shows one resource snapshot with readable units and colored status labels.
+6. `unlink` releases mounts and removes Borrow access in both directions.
+7. `--agent` selects a machine. `--color auto|always|never` controls Borrow formatting.
 
-What does **not** work yet, stated plainly:
+Current verification: 88 automated tests pass. Formatting checks and Clippy pass.
+These checks cover local logic and CLI behavior, not the full two machine workflow.
 
-* No mount. Commands run in the login directory on the box, not in your project. This is
-  the whole of Phase 2 and it is what makes the tool worth using.
-* `cwd` and `env` on `RemoteCommand` are still declared and unused. They are the Phase 2
-  slots for the mounted path and the artifact split variables.
-* LAN only. Cross network use needs the Coordinator in Phase 4.
-* No warm sessions, no `ps`, no `stop`, no `top`. That is Phase 3.
-* `link` does not write a `~/.ssh/config` entry. It turned out not to need one: everything
-  ssh needs is stored in borrow's own config and passed on the command line, which leaves
-  your own ssh files alone.
+Still outstanding:
 
-Three things worth knowing, because each one was a real bug found by running the tool:
+1. Compare real mounted builds with native Agent builds, especially incremental builds.
+2. Verify sleep recovery, stale mounts, and file watchers.
+3. Verify Node and Python redirects with existing local directories. The current code
+   preserves existing directories rather than replacing them.
+4. Read and apply settings from `borrow.toml`. It currently acts only as a project marker.
+5. Build persistent sessions and process management in Phase 3.
+6. Build the cross network Coordinator in Phase 4.
 
-* ssh splits `UserKnownHostsFile` on whitespace, so the path has to be quoted or a config
-  directory containing a space silently makes the box look unknown.
-* Without a terminal, a remote command outlives the connection. borrow asks for one only
-  when a person is at the keyboard, so ctrl-c works interactively without putting `\r\n`
-  and merged streams into a redirected build log.
-* `BatchMode=yes` matters. Without it ssh quietly falls back to asking for a password,
-  which is exactly the failure that should be loud.
+SSH host paths with spaces remain quoted, interactive commands request a terminal,
+and password fallback stays disabled. Borrow stores SSH options in its own configuration
+and does not write `~/.ssh/config`.
+
+See `docs/PROJECT_STATUS.md` for the simple file reference and phase record.
 
 ## How the phases work
 
@@ -780,12 +799,12 @@ with live output, and `borrow info` prints the box's specs. LAN only, no mount y
 
 Where the tool stops being a fancy ssh alias and starts being genuinely worth using.
 
-**Status: not started. This is the current phase.**
+**Status: main implementation present. Acceptance testing and project overrides remain.**
 
-**First, split the crate.** The seams are visible by now, so do the workspace split while
-the codebase is still small, before adding features.
+**Workspace split: complete.** Shared logic, the Agent service, and user commands now
+live in three crates.
 
-**To implement**
+**Implemented**
 
 * The workspace split into `borrow-core`, `borrow-cli`, and `borrow-agent`.
 * `core/stack.rs` detecting `Cargo.toml`, `package.json`, and `pyproject.toml`.
@@ -795,12 +814,13 @@ the codebase is still small, before adding features.
   direction. The mount needs the mirror image: the Agent's public key installed on the
   Client, and the Client's ssh host key learned by the Agent. The Client sshd check stops
   being a warning and becomes a failure.
-* `agent/mounts.rs` automating the SSHFS mount, where the Agent pulls from the Client,
-  checking whether it is already mounted and remounting if stale.
-* `core/config.rs` handling per project `borrow.toml` overrides.
+* Mount setup lives in `core/mount.rs` and is executed on the Agent through SSH.
+  It reuses healthy mounts and recreates stale ones.
 * `run` now resolving the full chain: local project directory, to remote mount path, to
   split environment variables.
-* Saying what it did: `▶ running on archbox · /mnt/borrow/app · target → local disk`.
+* Saying what it did: `▶ Running on archbox · /mnt/borrow/app · target → local disk`.
+
+**Still outstanding:** Per project `borrow.toml` overrides and the acceptance checks below.
 
 **Things to watch out for**
 
@@ -1232,7 +1252,7 @@ human had to do. The right column is what the tool must do instead.
 | Handle key expiry and keepalives | Sane defaults baked in |
 
 **On naming.** The box has three different names: its Tailscale name, its system hostname,
-and its ssh alias. The `▶ running on ...` line must use the one chosen at pairing and stored
+and its ssh alias. The `▶ Running on ...` line must use the one chosen at pairing and stored
 in config. Otherwise "where did that actually run?" becomes confusing the moment those three
 names drift apart.
 
@@ -1370,15 +1390,15 @@ reused everywhere later.
 
 ## What to do next
 
-1. Finish `commands/run.rs` so that it actually spawns the ssh command instead of printing
-   the argv. Get streaming working before touching pairing or the daemon.
-2. Add Ctrl-C handling and real exit code propagation to that same path.
-3. Replace the hardcoded `"localbox"` host with `config.rs` and real pairing.
-4. Then the daemon, `info`, and `health`.
+1. Run Phase 2 acceptance checks on two machines after fresh pairing.
+2. Measure native and mounted clean and incremental builds.
+3. Test stale mounts, sleep recovery, existing artifact folders, and file watchers.
+4. Finish project overrides before declaring Phase 2 complete.
+5. Begin Phase 3 sessions and process management after the Phase 2 checks pass.
 
 ## Conventions
 
-* **Errors.** `anyhow` in the binaries, `thiserror` in `borrow-core`.
+* **Errors.** `anyhow` is used in all current crates. Typed shared errors remain planned.
 * **Async.** `tokio`. The tool is concurrent by nature, handling connections, streaming, and
   watching processes, so expect async everywhere past Phase 1.
 * **Config and wire messages.** `serde`, with `toml` and `serde_json`.
