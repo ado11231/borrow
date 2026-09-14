@@ -537,11 +537,11 @@ Verified on September 13, 2026 between a Mac Client and an Arch Linux Agent (arc
 
 ### Follow ups found during acceptance
 
-1. A `run` that loses its connection prints raw ssh messages. Borrow should print its own line saying the connection was lost and that the run continues on the Agent.
+1. Fixed on September 14, 2026: a `run` or `attach` that loses its connection printed raw ssh messages. SSH's own messages now go to a private log, and Borrow prints one line naming the Agent and what happens next. SSH exits 255 silently on a keepalive timeout, so a silent 255 triggers a quick ssh check before it is reported as a lost connection. Still to confirm on the two real machines.
 
-2. When `nvidia-smi` fails with a driver and library version mismatch, say so and suggest a reboot instead of reporting no GPU data.
+2. Fixed on September 14, 2026: when `nvidia-smi` is installed but failing, `health` and `top` show the reason. A driver and library version mismatch is named and suggests a reboot. The cached `info` specs still say no GPU data. Still to confirm on the two real machines.
 
-3. A run stopped with Ctrl C shows as `Failed 130`. `Interrupted` would read better.
+3. Fixed on September 14, 2026: a run ended with Ctrl C is recorded as `Interrupted` instead of `Failed 130`, and `ps` shows exit codes only for failures.
 
 4. Untested: file watchers inside sessions, several Clients sharing one Agent account, and large Node and Python projects.
 
@@ -571,9 +571,9 @@ Prepare public releases, installers, packages, diagnostics, licensing, contribut
 
 ## 13. Current Verification
 
-Verified on September 13, 2026.
+Verified on September 14, 2026.
 
-The full Rust workspace builds successfully. All 140 automated tests pass, twelve consecutive full runs were green, and formatting checks and Clippy pass. The Phase 3 flows were also accepted on a real Mac Client and Arch Linux Agent, recorded in section 11.
+The full Rust workspace builds successfully. All 146 automated tests pass, and formatting checks and Clippy pass. The Phase 3 flows were also accepted on a real Mac Client and Arch Linux Agent, recorded in section 11.
 
 The tests cover:
 

@@ -96,6 +96,9 @@ pub struct Health {
     #[serde(default)]
     pub workspace_free_mb: Option<u64>,
     pub gpus: Vec<GpuHealth>,
+    /// Why GPU numbers are missing when nvidia-smi is installed but failing.
+    #[serde(default)]
+    pub gpu_problem: Option<String>,
 }
 
 /// Live GPU numbers. VRAM is reported as free rather than total, because a

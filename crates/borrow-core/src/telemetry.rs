@@ -64,6 +64,7 @@ pub fn health(workspace: Option<&Path>) -> Health {
     std::thread::sleep(MINIMUM_CPU_UPDATE_INTERVAL);
     sys.refresh_cpu_usage();
     sys.refresh_memory();
+    let (gpus, gpu_problem) = gpu_health();
 
     Health {
         cpu_percent: sys.global_cpu_usage(),
@@ -74,7 +75,8 @@ pub fn health(workspace: Option<&Path>) -> Health {
         workspace_free_mb: workspace
             .and_then(free_space)
             .map(|free| free / BYTES_PER_MB),
-        gpus: gpu_health(),
+        gpus,
+        gpu_problem,
     }
 }
 
@@ -150,30 +152,55 @@ pub fn is_installed(program: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Ask nvidia-smi for comma separated values. Returns an empty list when there is
-/// no Nvidia GPU, which is the ordinary Linux to Linux case rather than a failure.
-fn nvidia_smi(fields: &str) -> Vec<Vec<String>> {
+/// Ask nvidia-smi for comma separated values. No Nvidia GPU gives an empty list, which
+/// is the ordinary case rather than a failure. `Err` explains an nvidia-smi that is
+/// installed but cannot reach the driver.
+fn nvidia_smi(fields: &str) -> Result<Vec<Vec<String>>, String> {
     let Ok(out) = Command::new("nvidia-smi")
         .arg(format!("--query-gpu={fields}"))
         .arg("--format=csv,noheader,nounits")
         .output()
     else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
 
     if !out.status.success() {
-        return Vec::new();
+        let mut text = String::from_utf8_lossy(&out.stdout).to_string();
+        text.push_str(&String::from_utf8_lossy(&out.stderr));
+        return match gpu_problem(&text) {
+            Some(problem) => Err(problem),
+            None => Ok(Vec::new()),
+        };
     }
 
-    String::from_utf8_lossy(&out.stdout)
+    Ok(String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| line.split(',').map(|f| f.trim().to_string()).collect())
-        .collect()
+        .collect())
+}
+
+/// A readable reason from a failed nvidia-smi. A version mismatch means a driver update
+/// is waiting for a reboot, which is common on rolling distributions.
+pub fn gpu_problem(output: &str) -> Option<String> {
+    if output.contains("No devices were found") {
+        return None;
+    }
+    if output.contains("version mismatch") {
+        return Some(
+            "NVIDIA driver and library versions differ, usually after a driver update. Reboot the Agent to fix".to_string(),
+        );
+    }
+    output
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| format!("nvidia-smi failed: {line}"))
 }
 
 fn gpu_specs() -> Vec<Gpu> {
     nvidia_smi("name,memory.total")
+        .unwrap_or_default()
         .into_iter()
         .map(|row| Gpu {
             name: row.first().cloned().unwrap_or_else(|| "gpu".to_string()),
@@ -182,8 +209,12 @@ fn gpu_specs() -> Vec<Gpu> {
         .collect()
 }
 
-fn gpu_health() -> Vec<GpuHealth> {
-    nvidia_smi("name,memory.free,memory.total,utilization.gpu,temperature.gpu")
+fn gpu_health() -> (Vec<GpuHealth>, Option<String>) {
+    let rows = match nvidia_smi("name,memory.free,memory.total,utilization.gpu,temperature.gpu") {
+        Ok(rows) => rows,
+        Err(problem) => return (Vec::new(), Some(problem)),
+    };
+    let gpus = rows
         .into_iter()
         .map(|row| GpuHealth {
             name: row.first().cloned().unwrap_or_else(|| "gpu".to_string()),
@@ -192,7 +223,8 @@ fn gpu_health() -> Vec<GpuHealth> {
             utilization_percent: row.get(3).and_then(|v| v.parse().ok()),
             temperature_c: row.get(4).and_then(|v| v.parse().ok()),
         })
-        .collect()
+        .collect();
+    (gpus, None)
 }
 
 #[cfg(test)]
@@ -210,6 +242,26 @@ mod tests {
         assert!(disk[0].contains("workspace disk"), "{disk:?}");
         assert!(resource_warnings(0, 0, None).is_empty());
         assert!(resource_warnings(200, 100, None).is_empty());
+    }
+
+    #[test]
+    fn a_driver_mismatch_is_named_and_other_failures_keep_their_reason() {
+        let mismatch = gpu_problem(
+            "Failed to initialize NVML: Driver/library version mismatch\nNVML library version: 615.71\n",
+        )
+        .unwrap();
+        assert!(mismatch.contains("Reboot the Agent"), "{mismatch}");
+        assert_eq!(
+            gpu_problem(
+                "\nNVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver.\n"
+            )
+            .as_deref(),
+            Some(
+                "nvidia-smi failed: NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver."
+            )
+        );
+        assert!(gpu_problem("No devices were found\n").is_none());
+        assert!(gpu_problem("").is_none());
     }
 
     #[test]

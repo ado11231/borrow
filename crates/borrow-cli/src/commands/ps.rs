@@ -2,7 +2,7 @@
 
 use crate::client::{self, unexpected};
 use borrow_core::config::Config;
-use borrow_core::control::{Job, JobKind, Request, Response};
+use borrow_core::control::{Job, JobKind, JobState, Request, Response};
 use borrow_core::presentation::{self, Style, Tone};
 use borrow_core::storage;
 
@@ -60,14 +60,14 @@ pub fn render(agent: &str, jobs: &[Job], all: bool, now: u64, style: Style) -> S
             JobKind::Run => "Run",
             JobKind::Session => "Session",
         };
-        let tone = match job.state.label() {
-            "Running" => Tone::Good,
-            "Completed" | "Ended" => Tone::Info,
-            "Stopped" => Tone::Warning,
-            _ => Tone::Error,
+        let tone = match job.state {
+            JobState::Running => Tone::Good,
+            JobState::Completed | JobState::Ended => Tone::Info,
+            JobState::Stopped | JobState::Interrupted => Tone::Warning,
+            JobState::Failed => Tone::Error,
         };
         let mut state = job.state.label().to_string();
-        if let Some(code) = job.exit_code.filter(|code| *code != 0) {
+        if let Some(code) = job.exit_code.filter(|_| job.state == JobState::Failed) {
             state = format!("{state} {code}");
         }
         let project: String = job
@@ -102,7 +102,6 @@ fn ago(seconds: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use borrow_core::control::JobState;
 
     fn job(kind: JobKind, state: JobState, started: u64) -> Job {
         Job {
@@ -135,6 +134,24 @@ mod tests {
         assert!(text.contains("Failed 101"));
         assert!(text.contains("2h ago"));
         assert!(!text.contains('\x1b'));
+    }
+
+    #[test]
+    fn only_failures_show_their_exit_code() {
+        let mut interrupted = job(JobKind::Run, JobState::Interrupted, 1000);
+        interrupted.exit_code = Some(130);
+        let mut stopped = job(JobKind::Run, JobState::Stopped, 1000);
+        stopped.exit_code = Some(130);
+        let text = render(
+            "archbox",
+            &[interrupted, stopped],
+            true,
+            1010,
+            Style::new(false),
+        );
+        assert!(text.contains("Interrupted       app"), "{text}");
+        assert!(text.contains("Stopped           app"), "{text}");
+        assert!(!text.contains("130"), "{text}");
     }
 
     #[test]

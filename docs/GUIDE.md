@@ -760,7 +760,7 @@ Implemented today:
 9. `unlink` removes this Client's environment files and key, and releases legacy mounts.
 10. `--agent` selects a machine. `--color auto|always|never` controls Borrow formatting.
 
-Current verification, on September 13, 2026: 140 automated tests pass, and formatting
+Current verification, on September 14, 2026: 146 automated tests pass, and formatting
 checks and Clippy pass. A loopback run on one Mac used a private unprivileged sshd, real
 rsync, and real tmux. It covered pairing, copying with exclusions, links, executable bits,
 unusual filenames, subfolder runs, pushes, pulls, receiver only edits, conflicts,
@@ -777,12 +777,12 @@ first `run cargo build` took 9 seconds including the copy, and the next started 
 
 Still outstanding:
 
-1. Borrow's own message when a `run` loses its connection, instead of raw ssh output.
-2. Naming an NVIDIA driver mismatch and suggesting a reboot instead of reporting no GPU.
-3. File watchers inside sessions, multiple Clients sharing one Agent account, and large
+1. Confirming on the real machines that a lost connection and an NVIDIA driver mismatch
+   now print Borrow's own messages. Both were fixed after acceptance.
+2. File watchers inside sessions, multiple Clients sharing one Agent account, and large
    Node and Python projects.
-4. Applying split overrides from `borrow.toml`. Only `sync.exclude` is read today.
-5. Build the cross network Coordinator in Phase 4.
+3. Applying split overrides from `borrow.toml`. Only `sync.exclude` is read today.
+4. Build the cross network Coordinator in Phase 4.
 
 SSH host paths with spaces remain quoted, interactive commands request a terminal,
 and password fallback stays disabled. Borrow stores SSH options in its own configuration

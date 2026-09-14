@@ -46,8 +46,12 @@ pub fn render(name: &str, health: &Health, style: Style) -> String {
         output.push_str(&style.row("Workspace", workspace(free, style)));
     }
 
-    if health.gpus.is_empty() {
-        output.push_str(&style.row("GPU", "No GPU data available"));
+    match (&health.gpu_problem, health.gpus.is_empty()) {
+        (Some(problem), _) => {
+            output.push_str(&style.row("GPU", style.paint(problem, Tone::Warning)))
+        }
+        (None, true) => output.push_str(&style.row("GPU", "No GPU data available")),
+        (None, false) => {}
     }
     for (index, gpu) in health.gpus.iter().enumerate() {
         output.push('\n');
@@ -153,6 +157,7 @@ mod tests {
                 utilization_percent: Some(71),
                 temperature_c: Some(76),
             }],
+            gpu_problem: None,
         }
     }
 
@@ -221,6 +226,13 @@ mod tests {
         assert!(render("archbox", &health, Style::new(false)).contains("VRAM         Unavailable"));
         health.gpus.clear();
         assert!(render("archbox", &health, Style::new(false)).contains("No GPU data available"));
+        health.gpu_problem = Some("Reboot the Agent to fix".to_string());
+        let output = render("archbox", &health, Style::new(false));
+        assert!(
+            output.contains("GPU          Reboot the Agent to fix"),
+            "{output}"
+        );
+        assert!(!output.contains("No GPU data available"));
     }
 
     #[test]

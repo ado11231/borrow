@@ -115,8 +115,13 @@ impl RemoteCommand {
 
     /// Run with this terminal's input and output attached directly, so bytes, window
     /// size changes, and Ctrl C pass through unchanged. Returns the remote exit code.
+    /// SSH's own messages go to a private log instead of the terminal, so a dropped
+    /// connection becomes a `Disconnected` error and anything else is shown as before.
     pub async fn interactive(&self) -> anyhow::Result<i32> {
+        let log = SshLog::create()?;
         let mut child = Command::new("ssh")
+            .arg("-E")
+            .arg(&log.0)
             .args(self.to_ssh_args())
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
@@ -133,7 +138,119 @@ impl RemoteCommand {
             }
         };
 
-        Ok(status.code().unwrap_or(EXIT_SIGNALLED))
+        let code = status.code().unwrap_or(EXIT_SIGNALLED);
+        let messages = log.read();
+        match (code, messages.is_empty()) {
+            (EXIT_SSH_FAILED, false) if connection_lost(&messages) => {
+                Err(Disconnected::Certain.into())
+            }
+            (EXIT_SSH_FAILED, true) => Err(Disconnected::Possible.into()),
+            _ => {
+                eprint!("{messages}");
+                Ok(code)
+            }
+        }
+    }
+}
+
+impl RemoteCommand {
+    /// Whether SSH can reach the Agent right now, without involving the daemon.
+    pub async fn reachable(agent: &config::Agent) -> bool {
+        let mut probe = RemoteCommand::to(agent, "true".to_string(), Vec::new());
+        probe.tty = false;
+        let status = Command::new("ssh")
+            .args(probe.to_ssh_args())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .status();
+        matches!(
+            tokio::time::timeout(std::time::Duration::from_secs(15), status).await,
+            Ok(Ok(status)) if status.success()
+        )
+    }
+}
+
+/// The exit code SSH uses for its own failures. A remote command can exit with it too,
+/// which is why the log decides whether SSH failed.
+const EXIT_SSH_FAILED: i32 = 255;
+
+/// SSH ended with its failure code. `Certain` means its messages describe a dropped
+/// connection. `Possible` means it printed nothing, which is both how a keepalive
+/// timeout ends and how a remote command exiting with 255 ends.
+#[derive(Debug, PartialEq)]
+pub enum Disconnected {
+    Certain,
+    Possible,
+}
+
+impl std::fmt::Display for Disconnected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Disconnected::Certain => f.write_str("The SSH connection to the Agent was lost"),
+            Disconnected::Possible => f.write_str("SSH exited with code 255"),
+        }
+    }
+}
+
+impl std::error::Error for Disconnected {}
+
+/// True when SSH's messages describe an established connection that dropped, as opposed
+/// to one that never opened, which keeps its own more specific message.
+fn connection_lost(messages: &str) -> bool {
+    const NEVER_OPENED: &[&str] = &[
+        "connect to host",
+        "Could not resolve",
+        "kex_exchange_identification",
+        "banner exchange",
+        "Permission denied",
+        "Host key verification failed",
+        "REMOTE HOST IDENTIFICATION HAS CHANGED",
+    ];
+    const DROPPED: &[&str] = &[
+        "client_loop",
+        "Broken pipe",
+        "not responding",
+        "closed by remote host",
+        "Connection reset",
+        "Read from remote host",
+        "packet_write_wait",
+        "Software caused connection abort",
+    ];
+    !NEVER_OPENED.iter().any(|marker| messages.contains(marker))
+        && DROPPED.iter().any(|marker| messages.contains(marker))
+}
+
+/// A private file for SSH's `-E` log, removed when dropped. SSH closes inherited file
+/// descriptors at startup, so a pipe cannot be used here.
+struct SshLog(PathBuf);
+
+impl SshLog {
+    fn create() -> anyhow::Result<SshLog> {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let path =
+            std::env::temp_dir().join(format!("borrow-ssh-{}.log", borrow_core::storage::new_id()));
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .context("Could not create a temporary file for SSH messages")?;
+        Ok(SshLog(path))
+    }
+
+    fn read(&self) -> String {
+        std::fs::read(&self.0)
+            .map(|bytes| String::from_utf8_lossy(&bytes).replace('\r', ""))
+            .unwrap_or_default()
+    }
+}
+
+impl Drop for SshLog {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
     }
 }
 
@@ -291,5 +408,39 @@ mod tests {
         let argv = remote(&["hi"]).to_ssh_args();
 
         assert!(!argv.contains(&"-i".to_string()), "argv was: {argv:?}");
+    }
+
+    #[test]
+    fn a_dropped_connection_is_told_apart_from_one_that_never_opened() {
+        assert!(connection_lost(
+            "Read from remote host 10.0.0.193: Can't assign requested address\nclient_loop: send disconnect: Broken pipe\n"
+        ));
+        assert!(connection_lost(
+            "Timeout, server 10.0.0.193 not responding.\n"
+        ));
+        assert!(!connection_lost(
+            "ssh: connect to host 10.0.0.193 port 22: Operation timed out\n"
+        ));
+        assert!(!connection_lost(
+            "kex_exchange_identification: read: Connection reset by peer\n"
+        ));
+        assert!(!connection_lost(
+            "ado@archbox: Permission denied (publickey).\n"
+        ));
+        assert!(!connection_lost(""));
+    }
+
+    #[test]
+    fn the_ssh_log_is_private_and_removed_afterwards() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let log = SshLog::create().unwrap();
+        let path = log.0.clone();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        std::fs::write(&path, "client_loop: send disconnect: Broken pipe\r\n").unwrap();
+        assert_eq!(log.read(), "client_loop: send disconnect: Broken pipe\n");
+        drop(log);
+        assert!(!path.exists());
     }
 }

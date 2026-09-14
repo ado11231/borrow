@@ -2,10 +2,10 @@
 
 use crate::client::{self, Refused};
 use crate::project::{self, Local};
-use crate::ssh::RemoteCommand;
+use crate::ssh::{Disconnected, RemoteCommand};
 use crate::transfer;
 use borrow_core::artifacts::{self, Layout};
-use borrow_core::config::Config;
+use borrow_core::config::{Agent, Config};
 use borrow_core::control::{Request, Response};
 use borrow_core::presentation::{self, Style};
 use borrow_core::stack;
@@ -46,9 +46,32 @@ pub async fn run(agent: Option<String>, cmd: Vec<String>) -> anyhow::Result<i32>
         Style::stderr().heading(announcement(&target.name, local.as_ref()))
     );
 
-    RemoteCommand::to(target, target.program().to_string(), args)
-        .interactive()
-        .await
+    let remote = RemoteCommand::to(target, target.program().to_string(), args);
+    interact(target, &remote, lost_connection(&target.name)).await
+}
+
+/// Run an interactive remote command, replacing SSH's messages about a dropped connection
+/// with `lost`. When SSH exits 255 silently, a quick check tells a keepalive timeout
+/// apart from a command that really exited with 255.
+pub async fn interact(target: &Agent, remote: &RemoteCommand, lost: String) -> anyhow::Result<i32> {
+    let error = match remote.interactive().await {
+        Ok(code) => return Ok(code),
+        Err(error) => error,
+    };
+    match error.downcast_ref::<Disconnected>() {
+        Some(Disconnected::Certain) => anyhow::bail!(lost),
+        Some(Disconnected::Possible) if RemoteCommand::reachable(target).await => Ok(255),
+        Some(_) => anyhow::bail!(lost),
+        None => Err(error),
+    }
+}
+
+/// Said instead of SSH's own messages. A run belongs to its connection, so the Agent
+/// stops it once it notices, and sessions are the way to outlive a disconnect.
+pub fn lost_connection(name: &str) -> String {
+    format!(
+        "Lost connection to {name}. The Agent stops the run once it notices, unless it finishes first. See how it ended with borrow ps --all, and use borrow attach for work that must survive a disconnect"
+    )
 }
 
 /// Show resource warnings. A failed check is ignored, because it must never block work,
@@ -127,6 +150,16 @@ mod tests {
             announcement("archbox", Some(&local("crates/cli", vec![Stack::Rust]))),
             "▶ Running on archbox · app/crates/cli · target → local disk"
         );
+    }
+
+    #[test]
+    fn a_lost_connection_names_the_box_and_where_to_look() {
+        let message = lost_connection("archbox");
+        assert!(
+            message.starts_with("Lost connection to archbox."),
+            "{message}"
+        );
+        assert!(message.contains("borrow ps --all"), "{message}");
     }
 
     #[test]

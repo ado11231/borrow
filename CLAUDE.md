@@ -206,7 +206,7 @@ labels and respect terminal detection. Global `--color auto|always|never` contro
 Borrow output. Put Borrow options before `run`; later arguments belong to the remote
 command.
 
-The current suite contains 140 passing tests, and formatting and Clippy pass. The Phase 3
+The current suite contains 146 passing tests, and formatting and Clippy pass. The Phase 3
 flows were accepted on a real Mac Client and Arch Linux Agent, including a network drop
 mid build, a daemon restart, and an Agent reboot. File watchers and multiple Clients still
 need testing. `borrow.toml` split overrides are not applied yet.

@@ -120,18 +120,28 @@ pub async fn run(
         .or_else(|| status.signal().map(|signal| 128 + signal))
         .unwrap_or(1);
     jobs::update(&root, &job.id, |record| {
-        record.state = match (record.stop_requested, disconnected, code) {
-            (true, _, _) => JobState::Stopped,
-            (false, true, _) => JobState::Interrupted,
-            (false, false, 0) => JobState::Completed,
-            (false, false, _) => JobState::Failed,
-        };
+        record.state = final_state(record.stop_requested, disconnected, code);
         record.exit_code = Some(code);
         record.ended = Some(storage::now());
     })?;
     drop(lock);
     Ok(code)
 }
+
+/// How a finished run is recorded. Exit code 130 means the command ended on Ctrl C,
+/// which is the user's choice rather than a failure of the command.
+fn final_state(stop_requested: bool, disconnected: bool, code: i32) -> JobState {
+    match (stop_requested, disconnected, code) {
+        (true, _, _) => JobState::Stopped,
+        (false, true, _) => JobState::Interrupted,
+        (false, false, 0) => JobState::Completed,
+        (false, false, EXIT_INTERRUPTED) => JobState::Interrupted,
+        (false, false, _) => JobState::Failed,
+    }
+}
+
+/// 128 plus SIGINT, the shell convention for a command ended by Ctrl C.
+const EXIT_INTERRUPTED: i32 = 128 + libc::SIGINT;
 
 /// Wait for the command, forwarding hangups and termination. A lost SSH connection is
 /// treated as a hangup. It is noticed when the output pipe closes or when the process
@@ -183,4 +193,18 @@ fn output_closed() -> bool {
     };
     let ready = unsafe { libc::poll(&mut poll, 1, 0) };
     ready > 0 && poll.revents & (libc::POLLERR | libc::POLLHUP) != 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ctrl_c_is_an_interruption_and_other_codes_are_failures() {
+        assert_eq!(final_state(false, false, 0), JobState::Completed);
+        assert_eq!(final_state(false, false, 130), JobState::Interrupted);
+        assert_eq!(final_state(false, false, 101), JobState::Failed);
+        assert_eq!(final_state(false, true, 0), JobState::Interrupted);
+        assert_eq!(final_state(true, false, 130), JobState::Stopped);
+    }
 }

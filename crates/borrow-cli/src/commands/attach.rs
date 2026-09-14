@@ -64,5 +64,9 @@ pub async fn attach(
         ],
     );
     remote.tty = true;
-    remote.interactive().await
+    let lost = format!(
+        "Lost connection to {}. The session keeps running there. Run borrow attach again to return to it",
+        target.name
+    );
+    super::run::interact(target, &remote, lost).await
 }
