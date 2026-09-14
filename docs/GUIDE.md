@@ -741,8 +741,7 @@ borrow top              # live resources and active jobs
 
 ## Where things stand today
 
-Phase 1 is complete. Phase 3 is implemented and verified locally, and still needs
-acceptance testing on two real machines. Phase 3 replaced Phase 2's SSHFS execution with
+Phases 1 and 3 are complete. Phase 3 replaced Phase 2's SSHFS execution with
 filtered source copies, keeping Phase 2's project detection and artifact split.
 
 Implemented today:
@@ -769,13 +768,19 @@ environment files, busy refusal, stop with grace and kill, Ctrl C and interactiv
 terminal, lost connections, attach, detach, reattach, a daemon restart with a live session,
 live views, and unlink.
 
+Two machine acceptance, also on September 13, 2026, ran the same flows between a Mac
+Client and an Arch Linux Agent on the LAN with GNU rsync. A clean release build started
+inside `attach` finished on its own while the Client was offline for four minutes, and
+`attach` returned to the same session afterwards. A daemon restart kept the session, an
+Agent reboot marked it Interrupted, and `unlink` refused while a session was active. The
+first `run cargo build` took 9 seconds including the copy, and the next started in 1 second.
+
 Still outstanding:
 
-1. Acceptance testing on a real Client and a Linux Agent across the LAN, including GNU rsync
-   on the Agent, large projects, and real Rust, Node, and Python builds.
-2. Closing the Client mid build, sleeping, reconnecting, and reattaching.
-3. Agent reboot interruption, file watchers inside sessions, and multiple Clients sharing
-   one Agent account.
+1. Borrow's own message when a `run` loses its connection, instead of raw ssh output.
+2. Naming an NVIDIA driver mismatch and suggesting a reboot instead of reporting no GPU.
+3. File watchers inside sessions, multiple Clients sharing one Agent account, and large
+   Node and Python projects.
 4. Applying split overrides from `borrow.toml`. Only `sync.exclude` is read today.
 5. Build the cross network Coordinator in Phase 4.
 
@@ -956,7 +961,7 @@ and the Client's fans stay off.
 
 Where the daemon starts doing things ssh cannot.
 
-**Status: implemented and verified locally. Acceptance testing on two real machines remains.**
+**Status: complete. Accepted on a real Mac Client and Arch Linux Agent on September 13, 2026.**
 
 **Implemented**
 
@@ -977,7 +982,8 @@ Where the daemon starts doing things ssh cannot.
 rule 3 applies here more than anywhere. The same goes for file copying: wrap rsync.
 
 **Done when:** you close the lid mid build, reopen, run `borrow attach`, and you are back in
-it, on a real Client and Agent pair.
+it, on a real Client and Agent pair. Met: the Client dropped its network for four minutes
+during a clean release build, and `attach` returned to the finished build.
 
 At the end of this phase borrow is an impressive, shippable personal tool.
 

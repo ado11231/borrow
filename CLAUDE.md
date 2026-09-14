@@ -193,8 +193,7 @@ Each phase must leave a working, usable tool. Phase 4 gates publishing, because 
 
 ## Current state
 
-**Phase 1 is complete. Phase 3 is implemented and verified locally, with acceptance testing
-on two real machines outstanding.** Phase 3 replaced Phase 2's SSHFS execution with filtered
+**Phases 1 and 3 are complete.** Phase 3 replaced Phase 2's SSHFS execution with filtered
 source copies and kept its stack detection and artifact split.
 
 New pairings create only Client to Agent SSH trust and record the Agent's Borrow path.
@@ -207,10 +206,10 @@ labels and respect terminal detection. Global `--color auto|always|never` contro
 Borrow output. Put Borrow options before `run`; later arguments belong to the remote
 command.
 
-The current suite contains 140 passing tests, and formatting and Clippy pass. A loopback
-run through a private sshd with real rsync and tmux verified the Phase 3 flows. Real two
-machine acceptance, sleep and reconnect, Agent reboot, file watchers, and multiple Clients
-still need testing. `borrow.toml` split overrides are not applied yet.
+The current suite contains 140 passing tests, and formatting and Clippy pass. The Phase 3
+flows were accepted on a real Mac Client and Arch Linux Agent, including a network drop
+mid build, a daemon restart, and an Agent reboot. File watchers and multiple Clients still
+need testing. `borrow.toml` split overrides are not applied yet.
 
 The detailed file reference and completion record live in `docs/PROJECT_STATUS.md`.
 

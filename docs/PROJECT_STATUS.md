@@ -469,7 +469,7 @@ The work was verified locally on September 13, 2026. No tests on a remote Agent 
 
 ## 11. Phase 3: Source Copies, Persistent Sessions, and Live Status
 
-Status: Core implementation complete. Acceptance testing on two real machines remains.
+Status: Complete
 
 Phase 3 makes remote work persistent and manageable, and replaces mounted execution with source copies.
 
@@ -511,21 +511,45 @@ borrow run cargo test
 ▶ Running on archbox · app/crates/cli · target → local disk
 ```
 
-### What still needs proof
+### Two machine acceptance
 
-1. Pair a real Client with the Linux Agent and repeat the flows on the LAN, including GNU rsync on the Agent.
+Verified on September 13, 2026 between a Mac Client and an Arch Linux Agent (archbox) on the same LAN, with GNU rsync 3.5.0 and tmux on the Agent.
 
-2. Test real Rust, Node, Python, and mixed projects, and measure sync and build times on large projects.
+1. Pairing over the LAN, `info`, `health`, and the migration path: `unlink` cleared a Phase 2 pairing before the new `link`.
 
-3. Start a long build, close the Client, reconnect, and attach again.
+2. First `borrow run cargo build` copied 47 files and finished in 9 seconds in total. The second run had nothing to sync and started in 1 second. `cargo test` passed all 140 tests on the Agent.
 
-4. Test Agent reboot interruption, file watchers inside sessions, and several Clients sharing one Agent account.
+3. Subfolder runs, exit codes, standard input, and Ctrl C. The source copy held no `.git` and no `target`, and `target` lived in `artifacts`. `node_modules` in a Node project stayed on the Agent as a link into `artifacts`.
+
+4. Push, pull, preview, an edit made only on the Agent, and a two sided conflict. `sync`, `sync --pull`, and `run` all refused the conflict and changed nothing.
+
+5. Environment files stored with `-rw-------` permissions, visible to `run`, never included in a sync in either direction, and removed cleanly.
+
+6. `attach`, detach, `run` refused while a session is active, reattach to the same shell, `stop` within a second, and the Agent's personal `tmux ls` showing no Borrow sessions.
+
+7. `top` and `health --watch` refreshing every two seconds, exiting on Q and Ctrl C, and restoring the terminal.
+
+8. The completion rule. A clean `cargo build --release` started inside `attach`, the Client lost its network for four minutes, and `attach` afterwards returned to the same session with the build finished. A `run sleep 300` started before the outage finished on the Agent and was recorded as Completed.
+
+9. Restarting `borrow serve` kept the session running. Rebooting the Agent marked it Interrupted, a fresh `attach` created a new session, and GPU telemetry appeared once the reboot cleared an NVIDIA driver mismatch.
+
+10. `unlink` refused while a session was active. After `stop` it removed the key and this Client's environment files, and kept the source copies.
+
+### Follow ups found during acceptance
+
+1. A `run` that loses its connection prints raw ssh messages. Borrow should print its own line saying the connection was lost and that the run continues on the Agent.
+
+2. When `nvidia-smi` fails with a driver and library version mismatch, say so and suggest a reboot instead of reporting no GPU data.
+
+3. A run stopped with Ctrl C shows as `Failed 130`. `Interrupted` would read better.
+
+4. Untested: file watchers inside sessions, several Clients sharing one Agent account, and large Node and Python projects.
 
 5. Apply split overrides from `borrow.toml`. Only `sync.exclude` is read today.
 
 ### Phase 3 completion rule
 
-Start a long build, close the Client, reconnect later, attach again, and return to the same running task. The user must also be able to inspect and stop that task.
+Start a long build, close the Client, reconnect later, attach again, and return to the same running task. The user must also be able to inspect and stop that task. This was met on September 13, 2026, see the acceptance record above.
 
 ## 12. Later Phases
 
@@ -549,7 +573,7 @@ Prepare public releases, installers, packages, diagnostics, licensing, contribut
 
 Verified on September 13, 2026.
 
-The full Rust workspace builds successfully. All 140 automated tests pass, twelve consecutive full runs were green, and formatting checks and Clippy pass.
+The full Rust workspace builds successfully. All 140 automated tests pass, twelve consecutive full runs were green, and formatting checks and Clippy pass. The Phase 3 flows were also accepted on a real Mac Client and Arch Linux Agent, recorded in section 11.
 
 The tests cover:
 

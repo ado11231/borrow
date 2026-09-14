@@ -53,7 +53,7 @@ borrow run cargo build
 2. Phase 1: Complete. Pairing, remote commands, information, and health.
 3. Phase 2: Replaced. Its project detection and separate build output continue in Phase 3, where source copies replaced its project mount.
 4. Cleanup: Complete. Comments, CLI formatting, health colors, and documentation.
-5. Phase 3: Implemented and verified locally. Source copies, sync, sessions, job control, environment files, and live status. Testing on two real machines remains.
+5. Phase 3: Complete. Source copies, sync, sessions, job control, environment files, and live status, accepted on two real machines.
 6. Phase 4: Planned. Connections across networks.
 7. Phase 5: Planned. Notifications and port forwarding.
 8. Phase 6: Planned. Model workloads and broader platform support.
