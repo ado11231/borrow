@@ -14,7 +14,7 @@ The computer you work from is called the Client. It holds your project files, ed
 
 The powerful computer is called the Agent. It runs builds, servers, databases, containers, and other demanding work.
 
-Your source files stay on the Client. The Agent reaches those files through a secure mount. Generated files stay on the Agent because moving thousands of generated files across a network would make builds slow.
+You edit source files on the Client. The Agent keeps a filtered copy of each project on its own disk and Borrow keeps that copy in step. Generated files stay in separate Agent storage because copying thousands of generated files would make every sync slow.
 
 The goal is simple:
 
@@ -26,7 +26,7 @@ The goal is simple:
 
 4. See exactly where the command runs.
 
-Borrow uses existing tools such as SSH and SSHFS. It does not create its own remote shell or file system.
+Borrow uses existing tools such as SSH, rsync, and tmux. It does not create its own remote shell, file transfer, or terminal multiplexer.
 
 ## 2. Important Terms
 
@@ -42,21 +42,33 @@ The computer with more CPU, memory, disk space, or GPU power. It runs the real w
 
 A future service that will connect the Client and Agent when they are on different networks. This belongs to Phase 4 and does not exist yet.
 
-### Mount
+### Source copy
 
-A way for the Agent to see the Client project as a local folder.
+The Agent's filtered copy of one project for one Client. It contains only eligible source. Git ignored files, version control internals, generated folders, and environment files are never copied.
+
+### Baseline
+
+The last state both machines agreed on. Borrow compares each side with the baseline to tell edits on one side from edits on both.
 
 ### Artifact split
 
-The rule that keeps generated files on the Agent local disk. Rust `target`, Node `node_modules`, Python `.venv`, and caches must not live on the network mount.
+The rule that keeps generated files out of the source copy. Rust `target`, Node `node_modules`, Python `.venv`, and caches go to separate Agent storage.
+
+### Session
+
+A persistent tmux session on the Agent for one project. It keeps running when the Client disconnects or sleeps.
+
+### Job
+
+A Borrow run or session recorded on the Agent, shown by `borrow ps` and stopped by `borrow stop`.
 
 ### Control plane
 
-The small Borrow connection used for pairing, machine information, health, and future session management.
+The authenticated Borrow connection used for information, health, sync coordination, sessions, jobs, and environment files. It travels through SSH to a private socket on the Agent.
 
 ### Work connection
 
-The normal SSH connection that runs commands and streams their output.
+The normal SSH connection that runs commands, attaches sessions, and carries rsync transfers.
 
 ## 3. Repository Structure
 
@@ -112,11 +124,27 @@ Lists the shared modules that the crate provides.
 
 #### `src/config.rs`
 
-Loads and saves paired Agent information. It stores names, addresses, SSH details, cached machine specifications, mount details, and the default Agent.
+Loads and saves paired Agent information: names, addresses, SSH details, the Agent's Borrow program path, cached machine specifications, and the default Agent. Older mount settings still load but are no longer used.
 
 #### `src/protocol.rs`
 
-Defines the messages that the Client and Agent exchange. Current messages cover pairing, machine information, and health.
+Defines the pairing messages exchanged over TCP.
+
+#### `src/control.rs`
+
+Defines the authenticated control messages, their version, size limits, and framing. It also defines project, snapshot, session, and job records.
+
+#### `src/storage.rs`
+
+Creates private folders, random identifiers, and safe relative paths. It writes files atomically with owner only permissions and takes advisory locks.
+
+#### `src/source.rs`
+
+Decides which files are eligible source and builds manifests with content hashes, executable bits, and link targets. It applies mandatory exclusions, Git ignore rules, and `borrow.toml` exclusions, and refuses unsafe links.
+
+#### `src/sync.rs`
+
+Plans three way syncs, applies staged changes with backups and a recovery journal, and recovers interrupted syncs.
 
 #### `src/keys.rs`
 
@@ -124,7 +152,7 @@ Handles shared SSH key work. It learns machine identities, authorizes a Borrow k
 
 #### `src/telemetry.rs`
 
-Collects CPU, memory, disk, operating system, GPU, and installed tool information.
+Collects CPU, memory, disk, workspace disk, operating system, GPU, and installed tool information. It also decides resource warnings.
 
 #### `src/presentation.rs`
 
@@ -132,17 +160,15 @@ Keeps terminal formatting consistent across the Client and Agent. It handles col
 
 #### `src/preflight.rs`
 
-Checks whether the machines are ready. It checks SSH, SSHFS, required tools, listening services, and writable directories. Failures explain what the user needs to fix.
+Checks whether the machines are ready. It checks for an SSH server, rsync, tmux, and GPU tooling. Failures explain what the user needs to fix.
 
 #### `src/stack.rs`
 
-Finds the current project and recognizes Rust, Node, Python, and projects that use more than one stack.
+Finds project markers and recognizes Rust, Node, Python, and projects that use more than one stack.
 
-It looks for normal project files such as `Cargo.toml`, `package.json`, `pyproject.toml`, and `requirements.txt`.
+#### `src/artifacts.rs`
 
-#### `src/mount.rs`
-
-Decides where the project appears on the Agent and where generated files go. It creates mount commands, detects stale mounts, prepares local build folders, and describes the artifact split.
+Decides where generated files go for each stack and describes the artifact split. It also names the old mount folder that unlink still cleans up.
 
 ### `borrow-agent`
 
@@ -150,7 +176,23 @@ This is the Agent side library.
 
 #### `src/lib.rs`
 
-Runs `borrow serve`. It checks the machine, creates a short lived pairing code, listens for Client requests, installs the Client key, prepares the Agent key, and reports machine information and health.
+Runs `borrow serve`. It checks the machine, starts the private control service, creates a short lived pairing code, installs the Client key, and reports the Agent's Borrow program path.
+
+#### `src/service.rs`
+
+Runs the private control socket and the hidden SSH helper that relays to it. It checks versions, sizes, timeouts, and the connecting account, and ties each sync lease to its connection.
+
+#### `src/projects.rs`
+
+Manages project storage on the Agent: opening projects, sync leases, verified pushes, agreement based pulls, build output folders, environment files, and unlink cleanup.
+
+#### `src/jobs.rs`
+
+Keeps job records, reconciles them after restarts and reboots, creates and finds tmux sessions, and stops work without trusting stale process IDs.
+
+#### `src/runner.rs`
+
+Runs one foreground command for `borrow run` in its own process group. It passes terminal control to the command, forwards hangups, notices lost connections, and records the result.
 
 ### `borrow-cli`
 
@@ -158,11 +200,23 @@ This is the user facing command line program.
 
 #### `src/main.rs`
 
-Defines the available commands and sends each command to the correct module.
+Defines the available commands, including hidden helpers used over SSH, and sends each command to the correct module.
 
 #### `src/client.rs`
 
-Connects to the Agent control service and exchanges structured messages.
+Sends pairing requests and holds authenticated control connections to the Agent.
+
+#### `src/project.rs`
+
+Finds the current project and keeps the persistent project ID for each project and Agent.
+
+#### `src/transfer.rs`
+
+Runs previews, pushes, and pulls. It scans local files, plans changes, runs rsync with an explicit file list, sends heartbeats, and applies pulled files safely.
+
+#### `src/live.rs`
+
+Draws live views that refresh every two seconds, exit on Q or Ctrl C, and restore the terminal.
 
 #### `src/keys.rs`
 
@@ -170,15 +224,31 @@ Creates and loads the dedicated Client SSH key used by Borrow.
 
 #### `src/ssh.rs`
 
-Builds safe SSH commands. It handles command arguments, project folders, setup commands, environment values, live output, terminal behavior, and exit codes.
+Builds safe SSH commands, runs interactive commands with the terminal attached, and starts SSH for rsync.
 
 #### `src/commands/link.rs`
 
-Pairs the Client with an Agent. It now creates trust in both directions so the Client can run work and the Agent can mount Client files.
+Pairs the Client with an Agent. It creates only Client to Agent trust.
 
 #### `src/commands/run.rs`
 
-Finds the current project, prepares its mount, applies the artifact split, prints where the work will run, and starts the command on the Agent.
+Syncs the current project, shows resource warnings, prints where the work will run, and runs the command in the Agent copy.
+
+#### `src/commands/attach.rs`
+
+Copies the project on first use, then creates or rejoins its session and attaches the terminal.
+
+#### `src/commands/sync.rs`
+
+Pushes, pulls, or previews project source changes.
+
+#### `src/commands/env.rs`
+
+Adds, lists, and removes environment files kept on the Agent.
+
+#### `src/commands/ps.rs`
+
+Lists Borrow runs and sessions and stops one by ID.
 
 #### `src/commands/info.rs`
 
@@ -186,11 +256,15 @@ Shows stored Agent specifications. It can also ask the Agent for fresh informati
 
 #### `src/commands/health.rs`
 
-Shows a current snapshot of Agent resource use.
+Shows a current snapshot of Agent resource use, or a live view with `--watch`.
+
+#### `src/commands/top.rs`
+
+Shows live Agent resources with active Borrow jobs.
 
 #### `src/commands/unlink.rs`
 
-Releases Borrow mounts, removes Borrow access in both directions, removes saved host information, and forgets the Agent.
+Removes this Client's environment files and Borrow key from the Agent, releases older mounts, and forgets the Agent.
 
 ## 6. Why We Divided the Code This Way
 
@@ -223,7 +297,7 @@ Examples:
 
 3. Printing a user command result belongs in `borrow-cli`.
 
-4. A mount rule shared by execution and future sessions belongs in `borrow-core`.
+4. A source eligibility rule used by both computers belongs in `borrow-core`.
 
 ## 7. Phase S: Machine and Repository Setup
 
@@ -321,9 +395,9 @@ Commands ran in the Agent login folder. They could not yet run inside the Client
 
 ## 10. Phase 2: Project Mount and Artifact Split
 
-Status: Core implementation complete. Real machine acceptance testing remains.
+Status: Superseded for execution. Project detection and the artifact split remain in use.
 
-Phase 2 lets remote commands see the real Client project without placing generated files on the network mount.
+Phase 2 let remote commands see the real Client project through an SSHFS mount without placing generated files on the network mount. Phase 3 replaced the mount with source copies, because the mount needed an SSH server on the Client, reverse SSH trust, and a network round trip for every file operation. The record below describes what Phase 2 built.
 
 ### What we accomplished
 
@@ -367,27 +441,9 @@ project at /mnt/borrow/app
 target stored on Agent local disk
 ```
 
-### What still needs proof
+### What happened next
 
-1. Run the complete flow on two real machines after fresh pairing.
-
-2. Test real Rust, Node, Python, and mixed projects.
-
-3. Measure clean and incremental build times.
-
-4. Confirm generated files never land on the network mount. Test existing Node and Python folders because the current redirect setup preserves them.
-
-5. Test recovery after sleep and lost network access.
-
-6. Test file watchers such as Vite and Cargo Watch.
-
-7. Finish reading and applying custom settings from `borrow.toml`.
-
-8. Update public documentation after these checks pass.
-
-### Phase 2 completion rule
-
-A real build on the mounted project should stay close to native Agent speed while the Client remains quiet and cool.
+The mount acceptance checks were not completed. Phase 3 replaced mounted execution before they ran, so the remaining proof now belongs to the Phase 3 acceptance checks.
 
 ## Cleanup Before Phase 3
 
@@ -411,55 +467,61 @@ Status: Complete for local implementation and verification
 
 The work was verified locally on September 13, 2026. No tests on a remote Agent were performed during this cleanup.
 
-## 11. Phase 3: Persistent Sessions and Live Status
+## 11. Phase 3: Source Copies, Persistent Sessions, and Live Status
 
-Status: Not started
+Status: Core implementation complete. Acceptance testing on two real machines remains.
 
-Phase 3 will make remote work persistent and manageable.
+Phase 3 makes remote work persistent and manageable, and replaces mounted execution with source copies.
 
-### Planned work
+### What we accomplished
 
-1. Add `borrow attach`.
+1. Added authenticated control. A hidden helper started over SSH relays versioned, size limited messages to a private Agent socket with timeouts. Info and health moved to this route, and the TCP port now only pairs.
 
-2. Use an existing session tool such as tmux or zellij.
+2. Changed pairing to create only Client to Agent SSH trust. The Client no longer needs an SSH server.
 
-3. Let a session survive sleep, disconnects, and network changes.
+3. Added persistent random project IDs for each project and Agent, with separate Agent storage for source, build output, environment files, and state.
 
-4. Make reconnecting return the user to the same task.
+4. Added source eligibility rules. Git ignored files, version control internals, generated folders, and every environment file name are always excluded. `borrow.toml` can add exclusions. Unsafe links are refused.
 
-5. Add an Agent process list.
+5. Added three way sync with conflict refusal, receiver only edits kept, staged rsync transfers, hash verification, backups, a recovery journal, and automatic recovery.
 
-6. Add `borrow ps` to show remote work.
+6. Added `borrow sync`, `borrow sync --pull`, and `--check` previews.
 
-7. Add `borrow stop` to stop one known job safely.
+7. Changed `borrow run` to sync first, then run in the matching folder of the Agent copy with terminal passthrough, exit codes, and cancellation. Lost connections interrupt the run.
 
-8. Add continuously refreshed health information.
+8. Added `borrow attach`, which copies on first use and creates or rejoins one tmux session per project on an isolated Borrow tmux server.
 
-9. Add `borrow top` for a live resource view.
+9. Added persistent job records that survive daemon restarts, `borrow ps`, `borrow ps --all`, and `borrow stop` with a five second grace period.
 
-10. Warn when the Agent has too little free memory, disk space, or GPU memory for a large job.
+10. Added `borrow env add`, `borrow env list`, and `borrow env remove` for environment files kept outside source with private permissions.
 
-### Recommended work order
+11. Added `borrow health --watch` and `borrow top`, refreshing every two seconds.
 
-1. Define session and process messages in `borrow-core`.
+12. Added warnings before runs and new sessions at 90 percent RAM use or under 2 GiB of free workspace disk. Warnings never block work.
 
-2. Add the Agent process records.
+13. Updated `borrow unlink` to remove this Client's environment files, keep source copies and backups, refuse while this Client's projects are busy, and release older mounts only for older pairings.
 
-3. Add tmux or zellij session creation and reconnection.
+### Current example
 
-4. Add `borrow attach` in `borrow-cli`.
+```text
+borrow run cargo test
 
-5. Add `borrow ps`.
+▶ Copying 3 files to archbox
+✓ Synced 3 changes to archbox
+▶ Running on archbox · app/crates/cli · target → local disk
+```
 
-6. Add `borrow stop`.
+### What still needs proof
 
-7. Add live health updates.
+1. Pair a real Client with the Linux Agent and repeat the flows on the LAN, including GNU rsync on the Agent.
 
-8. Add `borrow top`.
+2. Test real Rust, Node, Python, and mixed projects, and measure sync and build times on large projects.
 
-9. Add resource warnings.
+3. Start a long build, close the Client, reconnect, and attach again.
 
-10. Test disconnect and reconnection on real machines.
+4. Test Agent reboot interruption, file watchers inside sessions, and several Clients sharing one Agent account.
+
+5. Apply split overrides from `borrow.toml`. Only `sync.exclude` is read today.
 
 ### Phase 3 completion rule
 
@@ -485,37 +547,41 @@ Prepare public releases, installers, packages, diagnostics, licensing, contribut
 
 ## 13. Current Verification
 
-The full Rust workspace builds successfully.
+Verified on September 13, 2026.
 
-All 88 automated tests pass. Formatting checks and Clippy also pass.
+The full Rust workspace builds successfully. All 140 automated tests pass, twelve consecutive full runs were green, and formatting checks and Clippy pass.
 
-The tests currently cover:
+The tests cover:
 
-1. Project detection.
+1. Project detection, project identity, and artifact split rules.
 
-2. Artifact split rules.
+2. Source eligibility, including nested ignore negations, repository excludes, environment files, generated folders, and `target` beside `Cargo.toml` only.
 
-3. Mount command construction.
+3. Link safety, including links that escape through other links, loops, and absolute targets.
 
-4. Stale mount handling logic.
+4. Three way planning, conflicts, receiver only edits, deletions, and agreement based baselines.
 
-5. Agent selection and configuration.
+5. Staged application, hash verification, rollback after a failure midway, and recovery before and after the commit point.
 
-6. Pairing code parsing.
+6. Sync leases, verified pushes, excluded paths sent by a Client, and pulls.
 
-7. SSH command construction.
+7. Environment file privacy, validation, replacement, removal, and scoped unlink cleanup.
 
-8. Safe shell argument handling.
+8. Job reconciliation, reboot detection, stale process IDs, graceful stop with a kill after five seconds, and history limits.
 
-9. Working directory and environment setup.
+9. Control framing, version mismatches, oversized messages, and lease release when a connection closes.
 
-10. Host and authorized key handling.
+10. Agent selection, configuration, legacy configuration, pairing code parsing, and SSH command construction.
 
-11. Terminal color options, help, errors, and remote argument forwarding.
+11. Safe shell argument handling, rsync remote path escaping, and argument forwarding for hidden helpers.
 
-12. Health thresholds, readable units, missing GPU data, and invalid values.
+12. Terminal colors, help, errors, previews, job lists, health thresholds, quit keys, and commands that need a terminal.
 
-Automated tests do not replace the two machine checks still required for Phase 2.
+A loopback test on one Mac used a private unprivileged SSH server, real rsync, and real tmux, with the Client and Agent as separate Borrow storage areas. It verified pairing, protected info and health, copying with exclusions, links, executable bits, unusual file names, subfolder runs, pushes, pulls, receiver only edits, conflicts, environment files, busy refusal, stop with grace and kill, interactive input and Ctrl C in a terminal, lost connections, attach, detach, reattach, a daemon restart with a live session, live views, and unlink.
+
+That loopback test found and fixed three problems: openrsync splitting the remote path on spaces, a five second delay closing every control connection, and lost connections going unnoticed on macOS.
+
+Automated and loopback tests do not replace the two machine checks still required for Phase 3.
 
 ## 14. Important Product Rules
 
@@ -523,21 +589,25 @@ Automated tests do not replace the two machine checks still required for Phase 2
 
 2. Every remote command must say where it runs.
 
-3. Generated files must stay off the network mount.
+3. Generated files must never be copied into source or mounted.
 
-4. Borrow should wrap trusted tools instead of rebuilding them.
+4. Environment files must never be treated as source.
 
-5. Setup must remain simple for a new user.
+5. Sync must never overwrite an edit made on both machines.
 
-6. Every failed setup check should explain the exact fix.
+6. Borrow should wrap trusted tools instead of rebuilding them.
 
-7. Private keys must never move between machines.
+7. Setup must remain simple for a new user.
 
-8. Borrow must not require a private network service from the user.
+8. Every failed setup check should explain the exact fix.
 
-9. Platform specific details must not leak into shared design.
+9. Private keys must never move between machines.
 
-10. A phase is complete only after its real user flow has been tested.
+10. Borrow must not require a private network service from the user.
+
+11. Platform specific details must not leak into shared design.
+
+12. A phase is complete only after its real user flow has been tested.
 
 ## 15. How to Update This Document
 

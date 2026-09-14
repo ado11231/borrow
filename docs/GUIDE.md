@@ -34,8 +34,8 @@ leaving the light machine.**
 
 You keep working exactly where you already work: your own editor, your own terminal, your
 own browser. The heavy parts of development go somewhere else. Builds, servers, databases,
-containers, coding agents, and small AI models all run on the powerful box. Your files
-never move.
+containers, coding agents, and small AI models all run on the powerful box. You keep
+editing your own files, and borrow copies eligible source to the box when work needs it.
 
 ```bash
 borrow run cargo build
@@ -65,8 +65,8 @@ Today you have three bad options.
 
 borrow takes a fourth path. Your machine stays your machine. It becomes a very thin
 control surface that builds commands, hands them to the powerful box, and streams the
-output back. The powerful box does all the actual work, reading your files through a
-mount.
+output back. The powerful box does all the actual work on a filtered copy of your project
+that borrow keeps in step with your machine.
 
 ## Who it is for
 
@@ -93,7 +93,7 @@ Saying no clearly is part of the design.
 * **Not a remote desktop.** No GUI streaming, no video of another computer. Tools like
   Sunshine and Moonlight already do that well.
 * **Not a new SSH, filesystem, container engine, or inference engine.** borrow wraps `ssh`,
-  `sshfs` or NFS, `docker`, `ollama`, and `nvidia-smi`. Writing our own versions of proven
+  `rsync`, `tmux`, `docker`, `ollama`, and `nvidia-smi`. Writing our own versions of proven
   infrastructure would be both slower to build and much harder for anyone to trust.
 
 ## Vocabulary
@@ -103,7 +103,7 @@ operating systems.
 
 * **Client.** The machine you work from. It stays light. My setup for this is a
   Mac with 8GB of RAM.
-* **Agent.** The machine with the resources. It does the real work and holds the mount. In
+* **Agent.** The machine with the resources. It does the real work and keeps project copies. In
   my setup this is an Arch Linux desktop.
 
 There is a third piece, the **Coordinator**, but it only exists to connect a Client and an
@@ -150,7 +150,7 @@ feel effortless and safe.
    │             │◄──────►│  (Phase 4)   │◄──────►│              │
    └─────────────┘        └──────────────┘        └──────────────┘
    You type commands      Introduces the two      Runs the real work.
-   here. Exposes          machines and relays     Holds the mount.
+   here. Exposes          machines and relays     Keeps project copies.
    localhost ports        traffic when they       Reports specs and
    forwarding to          cannot connect          health. Dials
    the Agent.             directly.               outward to connect.
@@ -159,7 +159,7 @@ feel effortless and safe.
 * **Client.** Runs your commands, shows output, and exposes `localhost` ports that quietly
   forward to the Agent. A dev server on the Agent's port 3000 should appear at
   `localhost:3000` on your machine.
-* **Agent.** Does the real work, holds the mount, reports specs and health, and dials
+* **Agent.** Does the real work, keeps project copies, reports specs and health, and dials
   outward rather than waiting for inbound connections. Dialing out is what gets through
   home routers and NAT without any port forwarding.
 * **Coordinator.** Tiny, cheap, always on. Only needed when Client and Agent are on
@@ -191,8 +191,9 @@ Concretely, two channels doing different jobs:
 
 | Channel | Carries | Why this channel |
 | --- | --- | --- |
-| **ssh**, shelled out to | `run` and `attach`, anything that executes | Authentication, encryption, TTY handling, and live stdout and stderr streaming already work correctly. Rewriting them is the textbook definition of rebuilding an existing system. |
-| **borrow daemon**, on its own port | `info`, `health`, `ps`, `stop`, anything structured | These want typed JSON, not a text stream. A small request and response server is the right shape, and it is the seed of everything Phase 3 and Phase 4 need. |
+| **ssh**, shelled out to | `run`, `attach`, and rsync transfers, anything that executes or copies bytes | Authentication, encryption, TTY handling, and live stdout and stderr streaming already work correctly. Rewriting them is the textbook definition of rebuilding an existing system. |
+| **borrow daemon**, on a private Unix socket reached through ssh | `info`, `health`, sync leases, sessions, `ps`, `stop`, environment files, unlink cleanup | These want typed messages, not a text stream. A hidden helper started over ssh relays them to a socket only the Agent account can open, so every structured request is authenticated by ssh too. |
+| **borrow daemon**, on its TCP port | Pairing only | A new Client has no key yet. The single use code is the only thing this port accepts. |
 
 **Why not one custom channel for everything?** Because you would own message framing,
 reconnection, backpressure, and remote process lifecycle *before your first command ever
@@ -201,9 +202,10 @@ stdio. The daemon then starts small and grows only when there is a real reason.
 
 The daemon grows on a schedule:
 
-* **Phase 1.** Answers `info` and `health`. Read only, holds no state.
-* **Phase 3.** Owns warm sessions and the process table, so `ps` and `stop` become real and
-  sessions survive a disconnect. This is where it starts doing things ssh genuinely cannot.
+* **Phase 1.** Answered `info` and `health` over TCP. Read only, held no state.
+* **Phase 3.** Moved every structured request behind ssh authentication, and now owns sync
+  leases, persistent tmux sessions, job records, and environment files, so `ps` and `stop`
+  are real and sessions survive a disconnect.
 * **Phase 4.** Stops listening and starts dialing outward to the Coordinator, which is what
   makes cross network use possible through a home router.
 * **Phase 7.** The very same daemon is what a stranger installs. `serve` and `link` are the
@@ -214,53 +216,96 @@ The daemon grows on a schedule:
 Walk through `borrow run cargo build` end to end.
 
 1. You type `borrow run cargo build` on the Client.
-2. The Client resolves the current project directory to its remote mounted path, and
-   detects the stack to pick the right artifact split environment variables. This is Phase
-   2 work; before that, a fixed path is used.
-3. The Client spawns `ssh archbox '<cd, then env, then cargo build>'`.
-4. The Agent runs the command inside the mounted project directory, with build output going
-   to Agent local disk.
-5. stdout and stderr stream back over the ssh pipe as they are produced.
-6. The Client prints `▶ Running on archbox`, then the live output, then propagates the exit
-   code.
+2. The Client finds the project: the enclosing Git repository, or else the nearest project
+   marker. It looks up the persistent project ID for this project and this Agent.
+3. Over one ssh control connection the Client opens the project, takes a sync lease, and
+   compares both manifests with the shared baseline. Changed files go through rsync into
+   staging, and the Agent verifies and applies them. Nothing moves when nothing changed.
+4. The Client asks for resource warnings and prints any.
+5. The Client prints `▶ Running on archbox · app/src · target → local disk` and spawns
+   `ssh archbox 'borrow internal-run --project <id> --cwd src -- cargo build'`.
+6. The Agent runs the command in the matching folder of the source copy as its own process
+   group, with build output redirected to separate Agent storage. Output streams back
+   byte for byte and the exit code propagates.
 
 Step 6 has two details that are easy to get wrong and important to get right. Output must
 **stream** rather than buffer, or the tool feels frozen. And the exit code must
 **propagate**, so `borrow run false` exits 1. Without that, borrow is useless inside scripts
 and CI.
 
-## Files: the mount and the artifact split
+## Files: source copies and the artifact split
 
 This is the make or break performance detail of the entire project.
 
-* Your project's **source files live on the Client**. That is the single source of truth.
-* The **Agent mounts** that folder so it appears inside the Linux filesystem, for example
-  at `/mnt/borrow/myapp`. SSHFS first, because it is simplest. NFS later if more speed is
-  wanted.
-* The Agent runs all work inside that mounted path, so processes see your real files.
-* **Build artifacts never go on the mount.** They are redirected to Agent local disk.
+* Your project's **source files live on the Client**. That is where you edit them.
+* The Agent keeps a **filtered copy** of eligible source on its own disk, one copy per
+  project and Agent. `borrow run` brings it up to date before every run. `borrow sync` pushes,
+  `borrow sync --pull` retrieves edits made on the Agent, and `--check` previews either.
+* **Build artifacts are never copied.** They are redirected to separate Agent storage.
 
 ```
-   CLIENT (source of truth)              AGENT (does the work)
-   ~/projects/myapp/                      /mnt/borrow/myapp/   ← mounted from Client
-     ├── src/         ─── mounted ───►      ├── src/
-     ├── Cargo.toml                         └── Cargo.toml
-     └── (no target/) ◄── NOT mounted
-
-                                          /var/lib/borrow/builds/myapp/  ← Agent local
-                                            └── target/        (fast local disk)
+   CLIENT (where you edit)                AGENT (does the work)
+   ~/projects/myapp/                      <data>/agent/projects/<id>/
+     ├── src/        ── rsync changes ──►   ├── source/        eligible files only
+     ├── Cargo.toml                         ├── artifacts/     target, node_modules, venv
+     ├── .env        ✗ never copied         ├── environment/   files from borrow env, 600
+     └── target/     ✗ never copied         └── state/         baseline, journal, backups
 ```
 
-Why this matters so much: a compiler writes an enormous number of small files into
-`target/` or `node_modules/`. Doing that over a network filesystem turns a fast build into
-an unbearable one. Keeping source on the mount and artifacts on local disk is the single
-change that makes remote development feel native. Getting this wrong does not make borrow
-somewhat slower, it makes borrow pointless.
+`<data>` is Borrow's platform data directory, such as `~/.local/share/borrow` on Linux.
 
-**A subtle direction detail.** SSHFS mounts are pulled by the machine that wants the files,
-so the **Agent** runs the `sshfs` command and connects *back* to the Client. That means the
-Client must be reachable by ssh from the Agent. This is a real setup requirement, and it is
-exactly why the manual setup phase has you prove it by hand first.
+**Why copies replaced the Phase 2 mount.** SSHFS made the Agent dial back into the Client,
+which required a second SSH trust and an SSH server on the Client. That broke golden rule 7
+for most strangers. Every file operation also became a network round trip, stale mounts hung
+builds, and file watchers missed events. A local copy gives native file speed on the Agent,
+needs only Client to Agent SSH, and survives sleep and network loss.
+
+**Eligible source.** The same rules apply to copies, pulls, previews, and backups.
+
+1. Git ignore rules from `.gitignore` files inside the project, even outside a Git
+   repository, plus the repository's `.git/info/exclude` and the Client's global excludes.
+   The Client sends these extra patterns so both machines decide identically. Ignored
+   folders are pruned before descending, so a nested negation cannot bring a file back.
+   Tracked files that match current rules are excluded too.
+2. Version control internals such as `.git`.
+3. Generated folders such as `node_modules`, `.venv`, `__pycache__`, and caches at any depth,
+   and `target` beside a `Cargo.toml`.
+4. `.env`, `.env.*`, `*.env`, and `.envrc` at every depth, including templates.
+5. `sync.exclude` patterns from `borrow.toml`, which can add exclusions but cannot override
+   the mandatory ones.
+
+Relative symlinks are kept when their resolved target stays inside eligible source. A link
+that escapes the project, or points at an excluded path, stops the sync with the path named.
+A file that becomes ignored after it was copied keeps its last shared state, so changing
+ignore rules never deletes or transfers anything by itself.
+
+**Sync safety.** Each side lists its files with SHA256 hashes, executable bits, and link
+targets. Borrow compares the sender, the receiver, and the last shared baseline:
+
+1. Changed only on the sender: copied.
+2. Changed only on the receiver: kept.
+3. Changed differently on both: the sync stops before anything changes. There is no force
+   option and no automatic resolution.
+4. Deleted on the sender: deleted on the receiver only if it was previously synchronized.
+
+rsync copies only changed regular files, named in an explicit list, into a staging folder
+over ssh. The receiver checks every destination and every staged hash, writes a recovery
+journal and backups of replaced files, applies the changes, and advances the baseline only
+at the end. A failure rolls back. An interrupted sync is recovered before any new work, and
+recovery stops with instructions when a path was edited after the interruption. The latest
+20 backup sets per project are kept. The Agent never trusts the Client's manifest: it
+enforces exclusions and link safety itself, and a pull only advances the baseline where both
+copies actually agree.
+
+Applying a sync requires the project to be idle. A run, a session, or another sync holds the
+project, and new work waits for recovery.
+
+**Environment files** stay out of source entirely. `borrow env add --file <local> --target
+<path>` sends the contents inside the ssh control message, never as a command argument, and
+stores them in a private folder with owner only permissions. The Agent exposes each one at
+its target through a Borrow managed link. Replacing needs `--replace`, `list` shows names
+only, and nothing keeps secret backups. The Agent account can read these files, and no
+encryption at rest is promised.
 
 ### Stack detection
 
@@ -270,11 +315,12 @@ did.
 | Detected file | Split applied |
 | --- | --- |
 | `Cargo.toml` | `CARGO_TARGET_DIR` points at Agent local disk |
-| `package.json` | `node_modules` kept Agent local, via symlink or bind mount |
+| `package.json` | `node_modules` linked to separate Agent storage |
 | `pyproject.toml` or `requirements.txt` | Virtual environment and pip cache kept Agent local |
 | Nothing detected, or an override | Whatever the project's `borrow.toml` says |
 
-A small per project `borrow.toml` exists only for the cases where detection gets it wrong.
+A small per project `borrow.toml` marks a project and can add `sync.exclude` patterns. Split
+overrides are not applied yet.
 
 ## Terminal output
 
@@ -301,7 +347,11 @@ Health colors always include written status labels:
 
 The three levels use green, yellow, and red. Missing or invalid measurements are
 Unavailable. Memory uses MiB and GiB with one decimal place. High utilization describes
-workload, not a failing machine. No automatic resource gate is added in this cleanup.
+workload, not a failing machine.
+
+Before a run or a new session, Borrow warns when RAM use is at or above 90 percent or when
+the Agent workspace disk has less than 2 GiB free. Warnings never block the job, and a
+failed measurement never blocks valid work.
 
 ## Seeing the box: specs and health
 
@@ -313,18 +363,19 @@ daemon.
   model and VRAM, disk space, OS and kernel, and what tooling is available such as CUDA,
   ROCm, Docker, or a running Ollama. Fetched once at pairing time and cached on the Client.
 * **Health, which is live.** What the box *is doing now*: CPU load, RAM used and free, VRAM
-  used and free, free disk, GPU temperature and utilization. Today this is a single
-  snapshot. Job records and continuous updates belong to Phase 3.
+  used and free, free disk, free workspace disk, GPU temperature and utilization.
 
 ```bash
-borrow info     # static specs, instant, from cache
-borrow health   # live snapshot right now
-borrow top      # planned for Phase 3
+borrow info             # static specs, instant, from cache
+borrow health           # live snapshot right now
+borrow health --watch   # the same view, refreshed every two seconds
+borrow top              # live resources plus active Borrow jobs
 ```
 
+Live views need a terminal, exit on Q or Ctrl C, and restore the terminal on exit.
 Collection is deliberately cheap and reuses existing tools. CPU, RAM, and disk come from
-the `sysinfo` crate. NVIDIA GPU data currently comes from `nvidia-smi`. Running jobs come from the daemon's own
-process table once Phase 3 exists.
+the `sysinfo` crate. NVIDIA GPU data comes from `nvidia-smi`. Jobs come from the daemon's
+records.
 
 This data becomes more than a readout in two places. First, a **preflight check** before a
 large job can warn you: `⚠ archbox has 3GB free, this may struggle`. That turns data into
@@ -371,18 +422,37 @@ open source tool that is a serious responsibility. These are design constraints 
 
 **Daemon exposure**
 
-* The default bind is loopback plus the local network. Never `0.0.0.0` on a public
-  interface, and never a port opened to the internet.
+* The TCP port binds to loopback plus the local network. Never `0.0.0.0` on a public
+  interface, and never a port opened to the internet. It accepts only pairing, reads at
+  most 64 KiB, and times out after ten seconds.
+* Everything else goes to a private Unix socket in the Agent's data directory, mode 600,
+  checked against the connecting account. The only way to it from another machine is a
+  hidden helper started through an authenticated ssh login.
+* Control messages carry a protocol version, are limited to 16 MiB, and have first
+  request, idle, and write timeouts. A mismatched version gets a message to update both
+  machines.
+* The trust boundary is the Agent's operating system account. Clients sharing that account
+  can see each other's Borrow jobs and projects. Cleanup is still scoped to the projects each
+  Client registered.
 * Cross network reachability comes from the Agent dialing out, not from an inbound port.
   This is also why it works behind home routers with no configuration.
-* Every request carries the paired identity. The daemon answers unauthenticated requests
-  from nobody.
 
 **Keys**
 
 * borrow never generates a key silently. If it creates one, it says so and says where.
 * It never copies a private key between machines, under any circumstance.
-* `borrow unlink` exists and genuinely removes the key from the Agent.
+* New pairings create only Client to Agent trust. The Client needs no SSH server.
+* `borrow unlink` removes the key from the Agent and this Client's environment files, keeps
+  source copies and backups, and refuses while that Client's projects have active work.
+
+**Jobs**
+
+* Runs and sessions are recorded on disk and reconciled after a daemon restart or reboot.
+* A process is signalled only while its PID and start time both still match the record.
+* `borrow stop` sends a graceful signal, waits five seconds, then kills what remains of
+  that process tree.
+* Sessions run on a Borrow owned tmux server with its own socket, so personal tmux sessions
+  are never touched.
 
 **Execution**
 
@@ -450,7 +520,7 @@ The convention is deliberately split by crate role.
   and exit. It does not need callers to match on error variants. `anyhow::Result` plus the
   `?` operator plus context strings gives exactly that.
 * **`thiserror` in `borrow-core`.** Once the shared library exists in Phase 2, callers will
-  want to distinguish a mount failure from a protocol mismatch from a missing binary.
+  want to distinguish a transfer failure from a protocol mismatch from a missing binary.
   Library errors should be typed enums that callers can match on.
 
 There is a nice distinction visible in `commands/run.rs` already. Its signature is
@@ -533,10 +603,14 @@ not when you imagine they might.
 | Async runtime | `tokio` | In use |
 | Application errors | `anyhow` | In use |
 | Safe shell quoting | `shell-words` | In use |
-| Library errors | `thiserror` | Phase 2 |
-| Config and wire messages | `serde` with `toml` and `serde_json` | Phase 1 |
-| Logging | `tracing` | Phase 1 |
-| Specs and health | `sysinfo`, plus `nvml-wrapper` or `nvidia-smi` | Phase 1 |
+| Library errors | `thiserror` | Planned |
+| Config and wire messages | `serde` with `toml` and `serde_json` | In use |
+| Logging | `tracing` | In use |
+| Specs and health | `sysinfo`, plus `nvidia-smi` | In use |
+| Git ignore matching | `ignore` | In use |
+| Content hashes | `sha2` | In use |
+| Live terminal views | `crossterm` | In use |
+| Process groups and signals | `libc` | In use |
 | QUIC transport | `quinn` | Phase 4 |
 | TLS | `rustls` | Phase 4 |
 | Notifications | `notify-rust` or `mac-notification-sys` | Phase 5 |
@@ -552,8 +626,8 @@ Always check the current version on crates.io before adding a dependency. Do not
 
 The four crate workspace is the correct end state, but on day one every crate boundary is a
 guess about code that has not been written yet. One crate lets you find the real seams
-first. By Phase 2 they are obvious, because the protocol types and the mount logic will
-visibly be used by both sides.
+first. By Phase 2 they are obvious, because the protocol types and the artifact split logic
+will visibly be used by both sides.
 
 ### Today: three crates, one binary
 
@@ -563,9 +637,10 @@ Done as the first task of Phase 2.
 borrow/
 ├── Cargo.toml               # workspace root: member list and shared versions
 └── crates/
-    ├── borrow-core/src/     # lib.rs, protocol, config, telemetry, preflight, keys
-    ├── borrow-agent/src/    # lib.rs, the daemon
-    └── borrow-cli/src/      # main.rs, ssh, client, keys, commands/
+    ├── borrow-core/src/     # config, control, protocol, source, sync, storage,
+    │                        # artifacts, stack, telemetry, preflight, presentation, keys
+    ├── borrow-agent/src/    # lib.rs pairing, service, projects, jobs, runner
+    └── borrow-cli/src/      # main.rs, client, transfer, project, live, ssh, keys, commands/
 ```
 
 **Three crates, but still one binary, and that is deliberate.** `borrow-core` and
@@ -595,9 +670,12 @@ borrow/
 │   ├── borrow-core/            # shared library, used by every binary
 │   │   └── src/
 │   │       ├── lib.rs
-│   │       ├── protocol.rs     # message types the machines exchange
+│   │       ├── protocol.rs     # pairing messages
+│   │       ├── control.rs      # authenticated control messages
 │   │       ├── config.rs       # config plus borrow.toml
-│   │       ├── mount.rs        # mount and artifact split logic
+│   │       ├── source.rs       # eligible source and manifests
+│   │       ├── sync.rs         # three way sync, apply, and recovery
+│   │       ├── artifacts.rs    # artifact split logic
 │   │       ├── stack.rs        # detect the stack, pick the split
 │   │       ├── process.rs      # spawning and streaming external commands
 │   │       ├── telemetry.rs    # specs and health types and collection
@@ -606,15 +684,15 @@ borrow/
 │   ├── borrow-cli/             # the borrow command on the Client
 │   │   └── src/
 │   │       ├── main.rs
-│   │       └── commands/       # link, run, attach, ps, stop, info, health, top
+│   │       └── commands/       # link, run, attach, sync, env, ps, stop, info, health, top
 │   │
 │   ├── borrow-agent/           # the daemon on the Agent, a library today
 │   │   └── src/
 │   │       ├── lib.rs          # borrow serve, called by the cli binary
-│   │       ├── executor.rs     # receives commands, runs them, streams output
-│   │       ├── sessions.rs     # warm sessions surviving disconnects
-│   │       ├── mounts.rs       # sets up the incoming mount
-│   │       └── telemetry.rs    # answers info and health requests
+│   │       ├── service.rs      # private control socket and ssh bridge
+│   │       ├── projects.rs     # source copies, leases, environment files
+│   │       ├── jobs.rs         # job records, tmux sessions, stopping
+│   │       └── runner.rs       # foreground runs
 │   │
 │   └── borrow-coordinator/     # tiny always on server, cross network only
 │       └── src/
@@ -631,7 +709,7 @@ borrow/
 ```
 
 **Why `borrow-core` exists.** The message format must be byte identical on both machines.
-The mount and artifact split logic is used by both the agent and the CLI. Telemetry types
+The source eligibility, sync, and artifact split logic is used by both the agent and the CLI. Telemetry types
 are shared between the agent that collects them and the CLI that displays them. Each of
 those is defined exactly once.
 
@@ -644,15 +722,17 @@ borrow link <code>      # Client: connect and remember the box
 borrow unlink           # Client: remove borrow's key from the Agent
 
 # daily use
-borrow run <cmd>        # run on the box, stream output back
-borrow attach <proj>    # warm session on the box, in the project, files mounted
-borrow ps               # what is running remotely and where to reach it
-borrow stop <id>        # stop a remote process
+borrow run <cmd>        # sync the project, run on the box, stream output back
+borrow attach [path]    # persistent session on the box, in the project copy
+borrow sync [path]      # push source changes; --pull retrieves, --check previews
+borrow env add|list|remove   # environment files kept outside source on the box
+borrow ps [--all]       # active Borrow runs and sessions, or recent history too
+borrow stop <id>        # stop a run or session
 
 # see the box
 borrow info             # static specs, cached
-borrow health           # live snapshot
-borrow top              # live continuously updating view
+borrow health           # live snapshot; --watch keeps refreshing
+borrow top              # live resources and active jobs
 ```
 
 ---
@@ -661,32 +741,43 @@ borrow top              # live continuously updating view
 
 ## Where things stand today
 
-Phase 1 is complete. Phase 2 has its main implementation and still needs acceptance
-testing on two machines. The current cleanup improves comments, terminal output,
-health displays, and documentation before Phase 3.
+Phase 1 is complete. Phase 3 is implemented and verified locally, and still needs
+acceptance testing on two real machines. Phase 3 replaced Phase 2's SSHFS execution with
+filtered source copies, keeping Phase 2's project detection and artifact split.
 
 Implemented today:
 
-1. `serve` performs setup checks and prints a single use pairing code.
-2. `link` sets up SSH trust in both directions and remembers the Agent.
-3. `run` finds the project, prepares its mount and artifact split, and executes over SSH.
-4. `info` shows cached specifications, with `--refresh` for a fresh request.
-5. `health` shows one resource snapshot with readable units and colored status labels.
-6. `unlink` releases mounts and removes Borrow access in both directions.
-7. `--agent` selects a machine. `--color auto|always|never` controls Borrow formatting.
+1. `serve` checks for an SSH server, rsync, tmux, and GPU tooling, starts the private
+   control socket, and prints a single use pairing code.
+2. `link` installs the Client key on the Agent and records the Agent's Borrow path. The
+   Client needs no SSH server.
+3. `run` syncs eligible source, warns about resources, and runs in the matching folder of
+   the Agent copy with terminal passthrough, exit codes, and cancellation.
+4. `attach` copies on first use, then creates or rejoins one tmux session per project.
+5. `sync` pushes, pulls with `--pull`, and previews with `--check`.
+6. `env add`, `env list`, and `env remove` manage environment files outside source.
+7. `ps`, `ps --all`, and `stop` manage runs and sessions from persistent records.
+8. `info` and `health` use authenticated control. `health --watch` and `top` refresh live.
+9. `unlink` removes this Client's environment files and key, and releases legacy mounts.
+10. `--agent` selects a machine. `--color auto|always|never` controls Borrow formatting.
 
-Current verification: 88 automated tests pass. Formatting checks and Clippy pass.
-These checks cover local logic and CLI behavior, not the full two machine workflow.
+Current verification, on September 13, 2026: 140 automated tests pass, and formatting
+checks and Clippy pass. A loopback run on one Mac used a private unprivileged sshd, real
+rsync, and real tmux. It covered pairing, copying with exclusions, links, executable bits,
+unusual filenames, subfolder runs, pushes, pulls, receiver only edits, conflicts,
+environment files, busy refusal, stop with grace and kill, Ctrl C and interactive input in a
+terminal, lost connections, attach, detach, reattach, a daemon restart with a live session,
+live views, and unlink.
 
 Still outstanding:
 
-1. Compare real mounted builds with native Agent builds, especially incremental builds.
-2. Verify sleep recovery, stale mounts, and file watchers.
-3. Verify Node and Python redirects with existing local directories. The current code
-   preserves existing directories rather than replacing them.
-4. Read and apply settings from `borrow.toml`. It currently acts only as a project marker.
-5. Build persistent sessions and process management in Phase 3.
-6. Build the cross network Coordinator in Phase 4.
+1. Acceptance testing on a real Client and a Linux Agent across the LAN, including GNU rsync
+   on the Agent, large projects, and real Rust, Node, and Python builds.
+2. Closing the Client mid build, sleeping, reconnecting, and reattaching.
+3. Agent reboot interruption, file watchers inside sessions, and multiple Clients sharing
+   one Agent account.
+4. Applying split overrides from `borrow.toml`. Only `sync.exclude` is read today.
+5. Build the cross network Coordinator in Phase 4.
 
 SSH host paths with spaces remain quoted, interactive commands request a terminal,
 and password fallback stays disabled. Borrow stores SSH options in its own configuration
@@ -799,7 +890,10 @@ with live output, and `borrow info` prints the box's specs. LAN only, no mount y
 
 Where the tool stops being a fancy ssh alias and starts being genuinely worth using.
 
-**Status: main implementation present. Acceptance testing and project overrides remain.**
+**Status: superseded for execution.** Project detection and the artifact split remain in use.
+Phase 3 replaced SSHFS execution and the reverse SSH trust with source copies, for the reasons
+given under "Files: source copies and the artifact split". The notes below record the
+Phase 2 design as it was built.
 
 **Workspace split: complete.** Shared logic, the Agent service, and user commands now
 live in three crates.
@@ -858,23 +952,32 @@ exactly what went wrong.
 **Done when:** a real build on the mount is roughly as fast as a native build on the Agent,
 and the Client's fans stay off.
 
-## Phase 3: Sessions and live health
+## Phase 3: Sessions, source copies, and live health
 
 Where the daemon starts doing things ssh cannot.
 
-**Status: not started.**
+**Status: implemented and verified locally. Acceptance testing on two real machines remains.**
 
-* `borrow attach <proj>` drops you into a warm session on the box, in the project, mounted.
-* Sessions survive sleep and network changes, and reconnecting lands you mid task.
-* The daemon owns a process table, which makes `borrow ps` and `borrow stop <id>` real.
-* Live `borrow health` and continuously updating `borrow top`.
-* A preflight free resource warning before large jobs.
+**Implemented**
 
-**Watch out for:** do not write a terminal multiplexer. Wrap `tmux` or `zellij` on the
-Agent. Golden rule 3 applies here more than anywhere.
+* Authenticated control through a hidden ssh helper and a private Agent socket, with
+  protocol versions, size limits, and timeouts. `info` and `health` moved there.
+* Filtered source copies with persistent project IDs, three way sync, staged application,
+  backups, and recovery. `borrow run` syncs before every run.
+* `borrow sync`, `borrow sync --pull`, and `--check` previews.
+* `borrow attach [path]` creates or rejoins one tmux session per project on an isolated
+  Borrow tmux server. Reattaching does not sync.
+* Persistent job records reconciled after restarts, `borrow ps`, `borrow ps --all` with the
+  latest 100 finished jobs, and `borrow stop` with a five second grace period.
+* `borrow env` for environment files kept outside source.
+* `borrow health --watch`, `borrow top`, and resource warnings before work starts.
+* Pairing without reverse trust, and unlink cleanup scoped to one Client's projects.
+
+**Watch out for:** do not write a terminal multiplexer. Wrap `tmux` on the Agent. Golden
+rule 3 applies here more than anywhere. The same goes for file copying: wrap rsync.
 
 **Done when:** you close the lid mid build, reopen, run `borrow attach`, and you are back in
-it.
+it, on a real Client and Agent pair.
 
 At the end of this phase borrow is an impressive, shippable personal tool.
 
@@ -943,8 +1046,8 @@ have to answer by hand is a bug in the setup.
 | S | Two machines that trust each other in both directions, and a repo ready to code in |
 | 0 | Proof the idea feels good, and the numbers that justify it |
 | 1 | A demoable run on the other machine tool, plus a specs view, on the LAN |
-| 2 | Remote work that sees your files and builds fast |
-| 3 | Warm sessions and live health, an impressive shippable tool |
+| 2 | Project detection and build output kept apart from source |
+| 3 | Source copies, persistent sessions, job control, and live health |
 | 4 | Works from anywhere, not just at home |
 | 5 | Feels polished: visible status, notifications, automatic ports |
 | 6 | Models, faster connections, more platforms |
@@ -954,9 +1057,9 @@ have to answer by hand is a bug in the setup.
 
 Naming these honestly is more useful than pretending they are solved.
 
-1. **Mount performance, in Phase 2.** Mounting build artifacts makes everything crawl. The
-   source versus artifacts split is what saves it. Test with a real build early, which is
-   exactly why Phase 0 exists.
+1. **Keeping two copies honest, in Phase 3.** Source copies are fast, but only safe if sync
+   never loses an edit. Three way planning, conflict refusal, staged application, and
+   recovery exist for exactly this, and they need real world testing.
 2. **NAT traversal, in Phase 4.** Connecting two home machines across networks is fiddly.
    Doing relay only first avoids most of the pain.
 3. **Scope creep.** This is not a remote desktop and not a RAM pooling tool. Stay in the
@@ -975,7 +1078,7 @@ Naming these honestly is more useful than pretending they are solved.
 | **0** | Prove the feel by hand | no code |
 | **1** | `run`, pairing on the LAN, `info` and `health` | single crate: `ssh.rs`, `protocol.rs`, `telemetry.rs`, `agent.rs`, `commands/` |
 | **2** | Split to the workspace, then mount and artifact split | `core/mount.rs`, `core/stack.rs`, `core/config.rs`, `agent/mounts.rs` |
-| **3** | `attach`, warm sessions, `ps` and `stop`, live `health` and `top` | `cli/commands/`, `agent/sessions.rs` |
+| **3** | Source copies, `sync`, `attach`, `env`, `ps` and `stop`, live `health` and `top` | `core/source.rs`, `core/sync.rs`, `core/control.rs`, `agent/service.rs`, `agent/projects.rs`, `agent/jobs.rs`, `agent/runner.rs`, `cli/transfer.rs`, `cli/commands/` |
 | **4** | Cross network tunnel | the whole `borrow-coordinator` crate, plus networking in `core` |
 | **5** | Menu bar with live readout, notifications, port forwarding | `mac/menubar/`, forwarding logic in `core` and `cli` |
 | **6** | Models, hole punching, Linux to Linux | a new module wrapping Ollama and ComfyUI, `coordinator/relay.rs` |
@@ -1007,7 +1110,11 @@ Coordinator in Phase 4 is.
 
 ## The ssh trust model
 
-There are **two independent one way trusts**, not one shared credential. Each machine keeps
+**Since Phase 3, Borrow needs only the Client to Agent direction.** The Agent to Client trust
+below was built by hand for the Phase 2 mount and is kept here as a record. Borrow no longer
+creates it, and `borrow unlink` removes the Borrow key it once installed on the Client.
+
+There were **two independent one way trusts**, not one shared credential. Each machine keeps
 its own private key, and neither private key is ever copied anywhere.
 
 ```
@@ -1103,7 +1210,8 @@ ssh-copy-id archbox
 ssh archbox                                        # accept the host key once
 ```
 
-Remote Login on the Client is needed for the Phase 2 mount, not for Phase 1.
+Remote Login on the Client was needed only for the Phase 2 mount. Borrow no longer needs it.
+The Agent now needs `rsync`, and `tmux` for sessions, rather than `sshfs`.
 
 ### A discrepancy worth knowing about
 
@@ -1161,8 +1269,8 @@ actually ruins a remote working day is this list:
   silently leaves the tailnet after roughly six months.
 * **Wifi power management** idling the network card on an unattended box. Ethernet avoids
   this entirely.
-* **The Agent to Client direction needs a desktop login,** because that passphrase is held
-  by a login ssh-agent. Phase 2 only.
+* **The Agent to Client direction needed a desktop login,** because that passphrase was held
+  by a login ssh-agent. This applied to the Phase 2 mount only.
 
 The preflight to run before leaving the house:
 
@@ -1242,10 +1350,10 @@ human had to do. The right column is what the tool must do instead.
 | --- | --- |
 | Generate an ssh key | `link` generates one if missing, **and says so, and says where** |
 | Install the key on the Agent | `link` does it over the wire. Never a paste. |
-| Write the `~/.ssh/config` entry | `link` writes it |
+| Write the `~/.ssh/config` entry | `link` stores the options in Borrow's own config instead |
 | Make sure sshd is running | `serve` checks, then prints `✗ sshd not running → sudo systemctl enable --now sshd` |
-| Make sure `sshfs` and `rsync` are present | `serve` checks and prints the `pacman` line. **Never auto installs.** |
-| Turn on Remote Login on the Client | `link` checks and points at the Sharing pane |
+| Make sure `rsync` and `tmux` are present | `serve` checks and prints the install line for that machine. `link` warns when the Client lacks rsync. **Never auto installs.** |
+| Turn on Remote Login on the Client | No longer needed |
 | Pick a hostname or display name | Chosen at pairing and stored in config, never read from the machine |
 | Harden sshd | `doctor` warns if password authentication is still enabled |
 | Install Tailscale | Detect and use it if present. Never require it. |
@@ -1261,9 +1369,8 @@ names drift apart.
 These came out of the manual setup and are not yet decided.
 
 1. **Does the Agent restore mounts at boot, or only when a Client asks for one?**
-   The Agent's key has a passphrase held in a login ssh-agent, so a boot time systemd mount
-   cannot unlock it. Currently leaning towards mounts following sessions. That is simpler,
-   safer, and it matches the principle that the daemon is the connection. Decide in Phase 2.
+   Resolved in Phase 3: there are no mounts. Source copies live on the Agent's disk and need
+   no reverse connection.
 
 2. **What exactly does the pairing code encode?**
    Currently leaning towards host, port, and a short lived single use token, which is
@@ -1271,7 +1378,7 @@ These came out of the manual setup and are not yet decided.
 
 3. **Should there be a `borrow config --effective`?**
    `sshd -T` prints what sshd actually resolved rather than what the file says. When the CLI
-   and the daemon disagree about a mount path or an artifact split, the same idea would end
+   and the daemon disagree about an exclusion or an artifact split, the same idea would end
    a whole category of confused debugging.
 
 ## Agent facts worth designing around
@@ -1279,8 +1386,7 @@ These came out of the manual setup and are not yet decided.
 Two properties of the specific Agent machine have real design consequences.
 
 * **There is no swap.** `Swap: 0B`. Heavy builds hit OOM and get killed outright rather than
-  gradually slowing down. This makes the Phase 3 preflight RAM warning load bearing rather
-  than cosmetic.
+  gradually slowing down. This is why runs and new sessions warn at 90 percent RAM use.
 * **The GPU is never fully free.** GNOME, Xwayland, and a browser hold roughly 500 MB of the
   8 GB at idle. `borrow info` must therefore report **available** VRAM, not total. Always
   report the number that would make somebody cancel a job.
@@ -1294,11 +1400,13 @@ Two properties of the specific Agent machine have real design consequences.
 ```bash
 cargo build
 cargo run -- --help
-cargo run -- run cargo build   # currently prints the ssh argv it would use
-cargo test                     # the quoting and injection tests in src/ssh.rs
+cargo fmt --all
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-You need a Rust toolchain, and an ssh connection to the machine you intend to borrow.
+You need a Rust toolchain. Using a real Agent also needs ssh, rsync on both machines, and
+tmux on the Agent for sessions.
 
 ## The full feature checklist
 
@@ -1310,16 +1418,17 @@ Nothing here is checked off yet beyond what section 3 records as complete.
 * Pair two machines once with a short code. *(P1)*
 * Run any command on the box with live output streamed back. *(P1)*
 * A clear "where it ran" confirmation on every remote command. *(P1)*
-* Mount the Client's project files onto the box. *(P2)*
-* Artifact split: source on the mount, build output on Agent local disk. *(P2)*
+* Copy eligible project source to the box, and pull edits back safely. *(P3)*
+* Artifact split: source copy and build output in separate Agent storage. *(P2)*
 * Zero configuration stack detection for Rust, Node, and Python picks the right split. *(P2)*
-* Per project `borrow.toml` overrides. *(P2)*
+* Per project `borrow.toml` exclusions *(P3)* and split overrides. *(planned)*
+* Environment files kept outside source. *(P3)*
 
 **Sessions and control**
 
 * `attach` drops you into the project on the box. *(P3)*
 * Warm sessions survive sleep and network changes, and reconnecting lands you mid task. *(P3)*
-* `ps` and `stop` to see and manage remote processes. *(P3)*
+* `ps` and `stop` to see and manage Borrow runs and sessions. *(P3)*
 
 **Visibility, seeing the box from the Client**
 
@@ -1327,7 +1436,7 @@ Nothing here is checked off yet beyond what section 3 records as complete.
 * `health`, a live CPU, RAM, VRAM, disk, and GPU temperature snapshot. *(P1)*
 * GPU detection and reporting, for example "RTX 4060, CUDA available". *(P1)*
 * `top`, a live updating resource view. *(P3)*
-* A preflight check that warns before a job if the box is low on free RAM or VRAM. *(P3)*
+* A preflight check that warns before a job if the box is low on RAM or workspace disk. *(P3)*
 
 **Networking**
 
@@ -1383,18 +1492,18 @@ reused everywhere later.
 * This is a distro agnostic tool. A static Rust binary runs anywhere.
 * Do not hardcode `apt`. The target is Arch, which uses `pacman`. Prefer checking and
   instructing over auto installing.
-* The Arch packages that matter are `sshfs` and `nfs-utils`.
+* The Arch packages that matter are `openssh`, `rsync`, and `tmux`.
 * Standardise the daemon on systemd.
 * GPU drivers, whether CUDA or ROCm, are the user's setup and not the tool's problem. The
   tool detects and reports the GPU.
 
 ## What to do next
 
-1. Run Phase 2 acceptance checks on two machines after fresh pairing.
-2. Measure native and mounted clean and incremental builds.
-3. Test stale mounts, sleep recovery, existing artifact folders, and file watchers.
-4. Finish project overrides before declaring Phase 2 complete.
-5. Begin Phase 3 sessions and process management after the Phase 2 checks pass.
+1. Pair a real Client with the Linux Agent and run the Phase 3 flow end to end.
+2. Measure sync time and build time for real Rust, Node, and Python projects.
+3. Close the Client mid build, sleep, reconnect, and reattach.
+4. Test Agent reboot recovery, file watchers in sessions, and multiple Clients.
+5. Apply split overrides from `borrow.toml`, then begin Phase 4.
 
 ## Conventions
 
@@ -1413,9 +1522,11 @@ reused everywhere later.
 * Do not implement RAM pooling or network memory. Reject the request and explain the
   physics.
 * Do not add remote desktop or GUI streaming features.
-* Do not mount build artifacts: `target/`, `node_modules/`, virtual environments, caches.
-  They live on Agent local disk. This is the single most important performance rule in the
-  project.
+* Do not copy or mount build artifacts: `target/`, `node_modules/`, virtual environments,
+  caches. They live in separate Agent storage. This is the single most important performance
+  rule in the project.
+* Do not copy environment files as source, and never pass their contents as command
+  arguments.
 * Do not hardcode a package manager. The target is Arch, which means `pacman`. Prefer
   detecting and instructing over auto installing.
 * Do not hardcode OS specific paths in shared code.
