@@ -1,6 +1,8 @@
 //! Agent hardware and resource measurements. GPU data is optional.
 
+use crate::presentation::capacity;
 use crate::protocol::{Gpu, GpuHealth, Health, Specs};
+use std::path::Path;
 use std::process::Command;
 use sysinfo::{Disks, MINIMUM_CPU_UPDATE_INTERVAL, System};
 
@@ -8,7 +10,6 @@ use sysinfo::{Disks, MINIMUM_CPU_UPDATE_INTERVAL, System};
 const INTERESTING_TOOLS: &[&str] = &[
     "docker",
     "podman",
-    "sshfs",
     "rsync",
     "git",
     "tmux",
@@ -48,9 +49,16 @@ pub fn specs(name: &str) -> Specs {
     }
 }
 
+/// RAM use at or above this percentage produces a warning before new work starts.
+pub const MEMORY_WARNING_PERCENT: u64 = 90;
+
+/// Less free workspace space than this produces a warning before new work starts.
+pub const DISK_WARNING_MB: u64 = 2 * 1024;
+
 /// A live snapshot. CPU usage needs two samples with a gap between them, because a
 /// percentage is a change over time and a single reading has nothing to compare to.
-pub fn health() -> Health {
+/// `workspace` is where Borrow keeps project copies, measured separately from `/`.
+pub fn health(workspace: Option<&Path>) -> Health {
     let mut sys = System::new_all();
     sys.refresh_cpu_usage();
     std::thread::sleep(MINIMUM_CPU_UPDATE_INTERVAL);
@@ -63,8 +71,59 @@ pub fn health() -> Health {
         memory_total_mb: sys.total_memory() / BYTES_PER_MB,
         swap_total_mb: sys.total_swap() / BYTES_PER_MB,
         disk_free_mb: root_disk().map(|(_, free)| free).unwrap_or(0) / BYTES_PER_MB,
+        workspace_free_mb: workspace
+            .and_then(free_space)
+            .map(|free| free / BYTES_PER_MB),
         gpus: gpu_health(),
     }
+}
+
+/// Resource warnings shown before a run or a new session. Measurement failures give no
+/// warning, because a missing reading must never block valid work.
+pub fn warnings(workspace: &Path) -> Vec<String> {
+    let mut sys = System::new();
+    sys.refresh_memory();
+    resource_warnings(
+        sys.used_memory() / BYTES_PER_MB,
+        sys.total_memory() / BYTES_PER_MB,
+        free_space(workspace).map(|free| free / BYTES_PER_MB),
+    )
+}
+
+pub fn resource_warnings(
+    used_mb: u64,
+    total_mb: u64,
+    workspace_free_mb: Option<u64>,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if total_mb > 0 && used_mb <= total_mb && used_mb * 100 >= total_mb * MEMORY_WARNING_PERCENT {
+        warnings.push(format!(
+            "RAM is {}% used ({} free). The job may run slowly or be stopped",
+            used_mb * 100 / total_mb,
+            capacity(total_mb - used_mb)
+        ));
+    }
+    if let Some(free) = workspace_free_mb
+        && free < DISK_WARNING_MB
+    {
+        warnings.push(format!(
+            "Only {} free on the Agent workspace disk. Builds may fail",
+            capacity(free)
+        ));
+    }
+    warnings
+}
+
+/// Available bytes on the file system holding `path`, chosen by the longest mount point.
+pub fn free_space(path: &Path) -> Option<u64> {
+    let path = path.canonicalize().ok()?;
+    let disks = Disks::new_with_refreshed_list();
+    disks
+        .list()
+        .iter()
+        .filter(|disk| path.starts_with(disk.mount_point()))
+        .max_by_key(|disk| disk.mount_point().as_os_str().len())
+        .map(|disk| disk.available_space())
 }
 
 /// Total and available bytes for the filesystem holding the root of the tree.
@@ -134,4 +193,28 @@ fn gpu_health() -> Vec<GpuHealth> {
             temperature_c: row.get(4).and_then(|v| v.parse().ok()),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn warnings_start_at_ninety_percent_ram_and_two_gib_disk() {
+        assert!(resource_warnings(89, 100, Some(4096)).is_empty());
+        let memory = resource_warnings(90, 100, Some(4096));
+        assert_eq!(memory.len(), 1);
+        assert!(memory[0].contains("RAM is 90% used"), "{memory:?}");
+        assert!(resource_warnings(10, 100, Some(2048)).is_empty());
+        let disk = resource_warnings(10, 100, Some(2047));
+        assert!(disk[0].contains("workspace disk"), "{disk:?}");
+        assert!(resource_warnings(0, 0, None).is_empty());
+        assert!(resource_warnings(200, 100, None).is_empty());
+    }
+
+    #[test]
+    fn free_space_is_measured_for_an_existing_path() {
+        assert!(free_space(&std::env::temp_dir()).is_some());
+        assert!(free_space(Path::new("/definitely/not/here")).is_none());
+    }
 }

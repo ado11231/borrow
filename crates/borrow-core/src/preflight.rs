@@ -146,16 +146,19 @@ pub fn writable_check(path: &str, purpose: &str) -> Check {
     }
 }
 
-/// The checks `borrow serve` runs before it listens. sshfs is required from Phase 2
-/// onward, because without it there is no mount and the box can only run commands
-/// against files it cannot see. rsync stays a warning; nothing needs it yet.
+/// The checks `borrow serve` runs before it listens. SSH carries all work and control,
+/// rsync copies project source, and tmux is only needed once someone uses attach.
 pub fn serve_checks() -> Vec<Check> {
     let mut checks = vec![
         ssh_server_check(),
-        tool_check("sshfs", State::Fail),
-        tool_check("rsync", State::Warn),
-        writable_check(crate::mount::MOUNT_BASE, "where your files appear"),
-        writable_check(crate::mount::ARTIFACT_BASE, "where build output goes"),
+        tool_check("rsync", State::Fail),
+        match is_installed("tmux") {
+            true => Check::pass("Tool available: tmux"),
+            false => Check::warn(
+                "Tool not installed: tmux (needed for borrow attach)",
+                install_hint("tmux"),
+            ),
+        },
     ];
 
     checks.push(match is_installed("nvidia-smi") {

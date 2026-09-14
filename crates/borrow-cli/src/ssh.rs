@@ -1,15 +1,13 @@
-//! Building and running commands on the Agent over ssh.
+//! Building and running SSH commands to the Agent.
 
 use anyhow::Context;
 use borrow_core::config;
-use shell_words::{join, quote};
+use shell_words::join;
 use std::path::PathBuf;
 use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-/// The exit code reported when the remote command was killed by a signal rather than
-/// exiting on its own. 130 is the shell convention for "terminated by SIGINT".
+/// The exit code reported when SSH ends without a remote exit status.
 const EXIT_SIGNALLED: i32 = 130;
 
 /// Disable password prompts, keep idle connections alive, and show SSH errors only.
@@ -23,17 +21,14 @@ const SSH_OPTIONS: &[&str] = &[
 
 /// Request a terminal only for interactive use.
 /// A terminal lets Ctrl C reach remote work but merges stdout and stderr.
-fn wants_terminal() -> bool {
+pub fn wants_terminal() -> bool {
     use std::io::IsTerminal;
 
     std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }
 
-/// A command to run on the Agent.
-///
-/// `setup` holds shell lines that must succeed before the command runs, such as
-/// bringing the mount up. `cwd` is the mounted project on the Agent, and `env`
-/// carries the artifact split variables that keep build output off it.
+/// A command to run on the Agent. Arguments are quoted for the remote shell, so no
+/// value can ever be read as shell syntax.
 pub struct RemoteCommand {
     pub host: String,
     pub user: Option<String>,
@@ -44,10 +39,6 @@ pub struct RemoteCommand {
     pub tty: bool,
     pub program: String,
     pub args: Vec<String>,
-    /// Shell lines run first, joined so that a failure stops everything after it.
-    pub setup: Vec<String>,
-    pub cwd: Option<String>,
-    pub env: Vec<(String, String)>,
 }
 
 impl RemoteCommand {
@@ -63,9 +54,6 @@ impl RemoteCommand {
             tty: wants_terminal(),
             program,
             args,
-            setup: Vec::new(),
-            cwd: None,
-            env: Vec::new(),
         }
     }
 
@@ -77,39 +65,12 @@ impl RemoteCommand {
         }
     }
 
-    /// Quote user arguments before passing them to the remote shell.
-    /// Join setup steps with && so failure prevents command execution.
     pub fn command_line(&self) -> String {
-        let user_command = join(
-            std::iter::once(self.program.as_str()).chain(self.args.iter().map(|s| s.as_str())),
-        );
-
-        let mut parts = self.setup.clone();
-
-        if let Some(cwd) = &self.cwd {
-            parts.push(format!("cd {}", quote(cwd)));
-        }
-
-        parts.push(match self.env.is_empty() {
-            true => user_command,
-            false => {
-                let assignments = self
-                    .env
-                    .iter()
-                    .map(|(key, value)| quote(&format!("{key}={value}")).into_owned())
-                    .collect::<Vec<String>>()
-                    .join(" ");
-
-                format!("env {assignments} {user_command}")
-            }
-        });
-
-        parts.join(" && ")
+        join(std::iter::once(self.program.as_str()).chain(self.args.iter().map(|s| s.as_str())))
     }
 
-    /// The full argument list for `ssh`. Options first, then the destination, then
-    /// the command, because ssh treats everything after the destination as payload.
-    pub fn to_ssh_args(&self) -> Vec<String> {
+    /// SSH options and the destination, without any remote command.
+    pub fn connection_args(&self) -> Vec<String> {
         let mut argv = Vec::new();
 
         for option in SSH_OPTIONS {
@@ -141,56 +102,59 @@ impl RemoteCommand {
         }
 
         argv.push(self.destination());
-        argv.push(self.command_line());
-
         argv
     }
 
-    /// Spawn `ssh`, stream both pipes as lines arrive, and return the remote exit code.
-    /// Ctrl-c kills the ssh child. Both pipes are drained to EOF before the child is
-    /// reaped, because a process can exit with bytes still sitting in the OS buffer.
-    pub async fn execute(&self) -> anyhow::Result<i32> {
+    /// The full argument list for `ssh`. Options first, then the destination, then
+    /// the command, because ssh treats everything after the destination as payload.
+    pub fn to_ssh_args(&self) -> Vec<String> {
+        let mut argv = self.connection_args();
+        argv.push(self.command_line());
+        argv
+    }
+
+    /// Run with this terminal's input and output attached directly, so bytes, window
+    /// size changes, and Ctrl C pass through unchanged. Returns the remote exit code.
+    pub async fn interactive(&self) -> anyhow::Result<i32> {
         let mut child = Command::new("ssh")
             .args(self.to_ssh_args())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
             .spawn()
-            .context("Could not spawn ssh; check that it is installed and on PATH")?;
-
-        let stdout = child.stdout.take().context("ssh stdout was not captured")?;
-        let stderr = child.stderr.take().context("ssh stderr was not captured")?;
-
-        let mut out = BufReader::new(stdout).lines();
-        let mut err = BufReader::new(stderr).lines();
+            .context("Could not start ssh. Check that it is installed and on PATH")?;
 
         let interrupt = tokio::signal::ctrl_c();
         tokio::pin!(interrupt);
-
-        let mut out_open = true;
-        let mut err_open = true;
-        let mut interrupted = false;
-
-        while out_open || err_open {
+        let status = loop {
             tokio::select! {
-                line = out.next_line(), if out_open => match line? {
-                    Some(line) => println!("{line}"),
-                    None => out_open = false,
-                },
-                line = err.next_line(), if err_open => match line? {
-                    Some(line) => eprintln!("{line}"),
-                    None => err_open = false,
-                },
-                _ = &mut interrupt, if !interrupted => {
-                    interrupted = true;
-                    child.start_kill().context("Could not signal the ssh process")?;
-                }
+                status = child.wait() => break status.context("Waiting for ssh failed")?,
+                _ = &mut interrupt => {}
             }
-        }
-
-        let status = child.wait().await.context("waiting on ssh failed")?;
+        };
 
         Ok(status.code().unwrap_or(EXIT_SIGNALLED))
     }
+}
+
+/// The `-e` helper rsync starts: SSH with Borrow's saved options for one Agent. Running
+/// through Borrow avoids passing file paths inside rsync's own option parsing.
+pub fn exec_for_rsync(agent: &config::Agent, args: Vec<String>) -> anyhow::Error {
+    use std::os::unix::process::CommandExt;
+
+    let mut rest = args.into_iter().peekable();
+    if rest.peek().is_some_and(|arg| arg == "-l") {
+        rest.next();
+        rest.next();
+    }
+    rest.next();
+    let mut remote = RemoteCommand::to(agent, String::new(), Vec::new());
+    remote.tty = false;
+    let error = std::process::Command::new("ssh")
+        .args(remote.connection_args())
+        .args(rest)
+        .exec();
+    anyhow::Error::from(error).context("Could not start ssh")
 }
 
 #[cfg(test)]
@@ -207,9 +171,6 @@ mod tests {
             tty: false,
             program: "echo".to_string(),
             args: args.iter().map(|s| s.to_string()).collect(),
-            setup: Vec::new(),
-            cwd: None,
-            env: Vec::new(),
         }
     }
 
@@ -240,6 +201,16 @@ mod tests {
     #[test]
     fn semicolon_stays_literal() {
         assert_eq!(cmd(&["a; whoami"]), "echo 'a; whoami'");
+    }
+
+    #[test]
+    fn a_program_path_with_a_space_stays_one_word() {
+        let mut command = remote(&["internal-control"]);
+        command.program = "/Users/me/Application Support/borrow".to_string();
+        assert_eq!(
+            command.command_line(),
+            "'/Users/me/Application Support/borrow' internal-control"
+        );
     }
 
     #[test]
@@ -278,7 +249,6 @@ mod tests {
         );
     }
 
-    /// Quote the known hosts path because SSH splits this option on whitespace.
     #[test]
     fn ssh_is_told_to_keep_quiet_about_itself() {
         let argv = remote(&["hi"]).to_ssh_args();
@@ -302,6 +272,7 @@ mod tests {
         assert_eq!(argv.last().unwrap(), "echo hi");
     }
 
+    /// Quote the known hosts path because SSH splits this option on whitespace.
     #[test]
     fn a_known_hosts_path_with_a_space_stays_one_path() {
         let mut command = remote(&["hi"]);
@@ -320,60 +291,5 @@ mod tests {
         let argv = remote(&["hi"]).to_ssh_args();
 
         assert!(!argv.contains(&"-i".to_string()), "argv was: {argv:?}");
-    }
-
-    #[test]
-    fn a_working_directory_becomes_a_cd() {
-        let mut command = remote(&["hi"]);
-        command.cwd = Some("/mnt/borrow/app".to_string());
-
-        assert_eq!(command.command_line(), "cd /mnt/borrow/app && echo hi");
-    }
-
-    /// The assignment is quoted whole rather than by halves, so a value is never
-    /// able to end the word it is in.
-    #[test]
-    fn split_variables_are_put_in_front_of_the_command() {
-        let mut command = remote(&["hi"]);
-        command.env = vec![(
-            "CARGO_TARGET_DIR".to_string(),
-            "/var/lib/b/target".to_string(),
-        )];
-
-        assert_eq!(
-            command.command_line(),
-            "env 'CARGO_TARGET_DIR=/var/lib/b/target' echo hi"
-        );
-    }
-
-    /// The reason the parts are joined with && rather than ;. A failed mount must
-    /// stop the build, not let it run somewhere empty and look like it worked.
-    #[test]
-    fn a_failed_setup_step_stops_the_command() {
-        let mut command = remote(&["hi"]);
-        command.setup = vec!["mount_it".to_string()];
-        command.cwd = Some("/mnt/borrow/app".to_string());
-
-        assert_eq!(
-            command.command_line(),
-            "mount_it && cd /mnt/borrow/app && echo hi"
-        );
-    }
-
-    #[test]
-    fn a_project_path_with_a_space_stays_one_word() {
-        let mut command = remote(&["hi"]);
-        command.cwd = Some("/mnt/borrow/my app".to_string());
-
-        assert_eq!(command.command_line(), "cd '/mnt/borrow/my app' && echo hi");
-    }
-
-    /// A variable's value is user controlled, so it is quoted like anything else.
-    #[test]
-    fn a_variable_value_cannot_break_out() {
-        let mut command = remote(&["hi"]);
-        command.env = vec![("K".to_string(), "a; rm -rf /".to_string())];
-
-        assert_eq!(command.command_line(), "env 'K=a; rm -rf /' echo hi");
     }
 }

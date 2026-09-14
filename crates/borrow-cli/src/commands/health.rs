@@ -1,22 +1,40 @@
-//! A current resource snapshot from the Agent.
+//! Agent resource use: one snapshot, or a live view with `--watch`.
 
-use crate::client;
+use crate::client::{self, Control, unexpected};
+use crate::live;
 use borrow_core::config::Config;
+use borrow_core::control::{Request, Response};
 use borrow_core::presentation::{Style, Tone, capacity};
-use borrow_core::protocol::{Health, Request, Response};
+use borrow_core::protocol::Health;
 
-pub async fn health(agent: Option<String>) -> anyhow::Result<i32> {
+pub async fn health(agent: Option<String>, watch: bool) -> anyhow::Result<i32> {
     let config = Config::load()?;
     let target = config.resolve(agent.as_deref())?;
-    let response = client::request(&target.host, target.daemon_port(), Request::Health).await?;
-    let Response::Health(health) = response else {
-        anyhow::bail!("The Agent returned an unexpected response");
-    };
-    print!("{}", render(&target.name, &health, Style::stdout()));
-    Ok(0)
+    if !watch {
+        let Response::Health(health) = client::request(target, Request::Health).await? else {
+            return Err(unexpected());
+        };
+        print!("{}", render(&target.name, &health, Style::stdout()));
+        return Ok(0);
+    }
+    live::require_terminal()?;
+    let control = tokio::sync::Mutex::new(Control::connect(target).await?);
+    let name = target.name.clone();
+    live::show(|| async {
+        let health = fetch(&mut *control.lock().await).await?;
+        Ok(render(&name, &health, Style::stdout()))
+    })
+    .await
 }
 
-fn render(name: &str, health: &Health, style: Style) -> String {
+pub async fn fetch(control: &mut Control) -> anyhow::Result<Health> {
+    match control.call(Request::Health).await? {
+        Response::Health(health) => Ok(health),
+        _ => Err(unexpected()),
+    }
+}
+
+pub fn render(name: &str, health: &Health, style: Style) -> String {
     let mut output = format!("\n{}\n\n", style.heading(format!("Agent: {name}")));
     output.push_str(&style.row("CPU", load(health.cpu_percent as f64, style)));
     output.push_str(&style.row(
@@ -24,6 +42,9 @@ fn render(name: &str, health: &Health, style: Style) -> String {
         memory(health.memory_used_mb, health.memory_total_mb, style),
     ));
     output.push_str(&style.row("Disk", format!("{} free", capacity(health.disk_free_mb))));
+    if let Some(free) = health.workspace_free_mb {
+        output.push_str(&style.row("Workspace", workspace(free, style)));
+    }
 
     if health.gpus.is_empty() {
         output.push_str(&style.row("GPU", "No GPU data available"));
@@ -60,6 +81,16 @@ fn render(name: &str, health: &Health, style: Style) -> String {
     }
     output.push('\n');
     output
+}
+
+fn workspace(free_mb: u64, style: Style) -> String {
+    match free_mb < borrow_core::telemetry::DISK_WARNING_MB {
+        true => style.paint(
+            format!("{} free  Low space", capacity(free_mb)),
+            Tone::Error,
+        ),
+        false => format!("{} free", capacity(free_mb)),
+    }
 }
 
 fn rating(value: f64, warning: f64, high: f64, labels: [&str; 3]) -> (&str, Tone) {
@@ -114,6 +145,7 @@ mod tests {
             memory_total_mb: 65536,
             swap_total_mb: 4096,
             disk_free_mb: 419840,
+            workspace_free_mb: Some(1024),
             gpus: vec![GpuHealth {
                 name: "Example GPU".to_string(),
                 vram_free_mb: Some(14336),
@@ -197,6 +229,7 @@ mod tests {
         assert!(output.contains("CPU          42.0%  Light"));
         assert!(output.contains("18.0 GiB / 64.0 GiB used, 46.0 GiB free  Available"));
         assert!(output.contains("410.0 GiB free"));
+        assert!(output.contains("Workspace    1.0 GiB free  Low space"));
         assert!(output.contains("71.0%  Busy"));
         assert!(output.contains("76°C  Warm"));
         assert!(!output.contains('\x1b'));

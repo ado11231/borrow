@@ -1,15 +1,20 @@
-//! Agent pairing, machine information, and health. Commands run through SSH.
+//! The Agent daemon: pairing over TCP, plus the private control service used for
+//! everything after pairing. Work itself runs through SSH.
+
+pub mod jobs;
+pub mod projects;
+pub mod runner;
+pub mod service;
 
 use anyhow::Context;
 use borrow_core::keys;
 use borrow_core::preflight;
 use borrow_core::protocol::{Paired, Request, Response};
 use borrow_core::telemetry;
-use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{info, warn};
 
@@ -23,8 +28,9 @@ const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 const CODE_LENGTH: usize = 8;
 
-/// The private key this box uses to reach back to a Client for the mount.
-const MOUNT_KEY_NAME: &str = "borrow_mount_ed25519";
+/// Pairing requests are small. Anything larger, or slower than this, is dropped.
+const PAIRING_LIMIT: u64 = 64 * 1024;
+const PAIRING_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The one time token that lets a Client install its key. Single use: pairing
 /// consumes it, and there is no way to ask the daemon what it was.
@@ -51,6 +57,7 @@ pub async fn serve(name: Option<String>, port: u16) -> anyhow::Result<i32> {
         anyhow::bail!("Fix the reported errors, then run borrow serve again");
     }
 
+    let _service = service::start(name.clone())?;
     let user = whoami().context("Could not work out which user is running the daemon")?;
     let token = new_token();
 
@@ -111,7 +118,10 @@ async fn accept_loop(listener: TcpListener, agent: Arc<Agent>) {
 /// Error response rather than a dropped connection, so the Client can explain it.
 async fn handle(mut stream: TcpStream, agent: Arc<Agent>, peer: IpAddr) -> anyhow::Result<()> {
     let mut line = String::new();
-    BufReader::new(&mut stream).read_line(&mut line).await?;
+    let mut reader = BufReader::new((&mut stream).take(PAIRING_LIMIT));
+    tokio::time::timeout(PAIRING_TIMEOUT, reader.read_line(&mut line))
+        .await
+        .context("Pairing request timed out")??;
 
     let response = match serde_json::from_str::<Request>(line.trim()) {
         Ok(request) => answer(request, &agent, peer),
@@ -129,8 +139,9 @@ async fn handle(mut stream: TcpStream, agent: Arc<Agent>, peer: IpAddr) -> anyho
 
 fn answer(request: Request, agent: &Agent, peer: IpAddr) -> Response {
     match request {
-        Request::Info => Response::Info(telemetry::specs(&agent.name)),
-        Request::Health => Response::Health(telemetry::health()),
+        Request::Info | Request::Health => Response::Error {
+            message: "This Agent answers info and health only over SSH. Update Borrow on the Client and run borrow link again".to_string(),
+        },
         Request::Pair {
             token,
             client,
@@ -143,8 +154,8 @@ fn answer(request: Request, agent: &Agent, peer: IpAddr) -> Response {
             &Client {
                 name: client,
                 public_key,
-                user,
-                host_keys,
+                _user: user,
+                _host_keys: host_keys,
             },
             peer,
         ),
@@ -155,8 +166,8 @@ fn answer(request: Request, agent: &Agent, peer: IpAddr) -> Response {
 struct Client {
     name: String,
     public_key: String,
-    user: String,
-    host_keys: Vec<String>,
+    _user: String,
+    _host_keys: Vec<String>,
 }
 
 fn pair(agent: &Agent, token: &str, client: &Client, peer: IpAddr) -> Response {
@@ -189,72 +200,28 @@ fn pair(agent: &Agent, token: &str, client: &Client, peer: IpAddr) -> Response {
     }
 }
 
-/// Establish both SSH trust directions without moving private keys.
+/// Authorize the Client key for SSH execution and private control.
 fn accept(agent: &Agent, client: &Client, peer: IpAddr) -> anyhow::Result<Paired> {
     let authorized = keys::authorize(&client.name, &client.public_key)
         .context("Could not add the Client's key to authorized_keys")?;
 
-    let known_hosts = keys::learn_host(&peer.to_string(), None, &client.host_keys)
-        .context("Could not record the Client's host keys")?;
-
-    let (identity_file, mount_key) =
-        mount_key().context("Could not prepare this box's key for the mount")?;
-
     info!("paired with {}", client.name);
     borrow_core::presentation::success(format!("Paired with {}", client.name));
     borrow_core::presentation::detail("Authorized", authorized.display());
-    borrow_core::presentation::detail("Mount key", identity_file.display());
-    borrow_core::presentation::detail("Mount source", format!("{}@{}", client.user, peer));
 
     Ok(Paired {
         name: agent.name.clone(),
         user: agent.user.clone(),
         host_keys: keys::host_keys(),
-        mount_key,
-        mount_identity_file: identity_file.display().to_string(),
-        mount_known_hosts: known_hosts.display().to_string(),
+        mount_key: String::new(),
+        mount_identity_file: String::new(),
+        mount_known_hosts: String::new(),
         client_address: peer.to_string(),
+        program: std::env::current_exe()
+            .ok()
+            .and_then(|path| path.to_str().map(str::to_string)),
         specs: telemetry::specs(&agent.name),
     })
-}
-
-/// Create a dedicated mount key once. It has no passphrase for unattended mounts.
-fn mount_key() -> anyhow::Result<(std::path::PathBuf, String)> {
-    let private = keys::ssh_dir()?.join(MOUNT_KEY_NAME);
-    let public = private.with_extension("pub");
-
-    if !public.exists() {
-        fs::create_dir_all(keys::ssh_dir()?)?;
-        keys::set_mode(&keys::ssh_dir()?, 0o700)?;
-
-        eprintln!("Generating a mount key at {}", private.display());
-
-        let status = std::process::Command::new("ssh-keygen")
-            .args([
-                "-t",
-                "ed25519",
-                "-N",
-                "",
-                "-q",
-                "-C",
-                &keys::marker("mount"),
-                "-f",
-            ])
-            .arg(&private)
-            .status()
-            .context("Could not run ssh-keygen")?;
-
-        if !status.success() {
-            anyhow::bail!(
-                "SSH key generation failed while creating {}",
-                private.display()
-            );
-        }
-    }
-
-    let text = fs::read_to_string(&public)?;
-
-    Ok((private, text.trim().to_string()))
 }
 
 /// Generate a token using operating system randomness.
@@ -371,6 +338,29 @@ fn announce(name: &str, addresses: &[SocketAddr], token: &str) {
     );
     eprintln!("  Press Ctrl C to stop");
     eprintln!();
+}
+
+#[cfg(test)]
+pub(crate) mod testing {
+    use std::path::PathBuf;
+
+    /// A private temporary Agent root removed when the test ends.
+    pub struct Root(pub PathBuf);
+
+    impl Root {
+        pub fn new() -> Root {
+            let path = std::env::temp_dir()
+                .join(format!("borrow-agent-{}", borrow_core::storage::new_id()));
+            borrow_core::storage::private_dir(&path).unwrap();
+            Root(path.canonicalize().unwrap())
+        }
+    }
+
+    impl Drop for Root {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
 }
 
 #[cfg(test)]

@@ -13,7 +13,9 @@ borrow-core = { path = "../borrow-core" }
 borrow-agent = { path = "../borrow-agent" }
 anyhow = { workspace = true }
 clap = { workspace = true }
+crossterm = { workspace = true }
 directories = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 shell-words = { workspace = true }
 sysinfo = { workspace = true }

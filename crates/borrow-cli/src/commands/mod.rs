@@ -1,5 +1,10 @@
+pub mod attach;
+pub mod env;
 pub mod health;
 pub mod info;
 pub mod link;
+pub mod ps;
 pub mod run;
+pub mod sync;
+pub mod top;
 pub mod unlink;

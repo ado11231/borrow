@@ -1,114 +1,118 @@
-//! `borrow run <cmd>`: run a command on the Agent, in your project, split.
+//! `borrow run <cmd>`: sync the project, then run a command in the Agent copy.
 
+use crate::client::{self, Refused};
+use crate::project::{self, Local};
 use crate::ssh::RemoteCommand;
-use borrow_core::config::{Agent, Config};
-use borrow_core::mount::{self, Layout};
+use crate::transfer;
+use borrow_core::artifacts::{self, Layout};
+use borrow_core::config::Config;
+use borrow_core::control::{Request, Response};
+use borrow_core::presentation::{self, Style};
 use borrow_core::stack;
 
 /// Run `cmd` on the Agent and return its exit code. A non zero code is not an
 /// error: borrow did its job, and the command it ran happened to fail.
 pub async fn run(agent: Option<String>, cmd: Vec<String>) -> anyhow::Result<i32> {
-    let Some((program, args)) = cmd.split_first() else {
+    if cmd.is_empty() {
         anyhow::bail!("No command given. Try borrow run echo hello");
-    };
+    }
 
     let config = Config::load()?;
     let target = config.resolve(agent.as_deref())?;
+    let local = project::locate(&std::env::current_dir()?);
 
-    let mut remote = RemoteCommand::to(target, program.clone(), args.to_vec());
+    let mut args = vec!["internal-run".to_string()];
+    let warnings = match &local {
+        Some(local) => {
+            let mut opened = transfer::open(target, local).await?;
+            transfer::push(&mut opened, target, local).await?;
+            let warnings = opened.control.call(Request::Warnings).await;
+            opened.control.close().await;
+            args.extend(["--project".to_string(), opened.id]);
+            if !local.cwd.is_empty() {
+                args.extend(["--cwd".to_string(), local.cwd.clone()]);
+            }
+            warnings
+        }
+        None => client::request(target, Request::Warnings).await,
+    };
+    show_warnings(warnings);
 
-    let here = std::env::current_dir()?;
-    let placement = place(target, &here)?;
-
-    if let Some(placement) = &placement {
-        remote.setup = placement.setup.clone();
-        remote.cwd = Some(placement.layout.source.display().to_string());
-        remote.env = placement.env.clone();
-    }
+    args.push("--".to_string());
+    args.extend(cmd);
 
     eprintln!(
         "{}",
-        borrow_core::presentation::Style::stderr()
-            .heading(announcement(&target.name, placement.as_ref()))
+        Style::stderr().heading(announcement(&target.name, local.as_ref()))
     );
 
-    remote.execute().await
+    RemoteCommand::to(target, target.program().to_string(), args)
+        .interactive()
+        .await
 }
 
-/// Everything that follows from being inside a project: where it appears on the
-/// Agent, how it gets there, and what keeps its build output off the mount.
-struct Placement {
-    layout: Layout,
-    setup: Vec<String>,
-    env: Vec<(String, String)>,
-    summary: Option<String>,
-}
-
-/// Work out where this command should run, or `None` when you are not inside a
-/// project at all. Running from nowhere in particular is a normal thing to do:
-/// `borrow run uname -a` should not need a `Cargo.toml` above it.
-fn place(target: &Agent, here: &std::path::Path) -> anyhow::Result<Option<Placement>> {
-    let Some(project) = stack::find(here) else {
-        return Ok(None);
-    };
-
-    let Some((source, keys)) = target.mount_source(&project.root) else {
-        anyhow::bail!(
-            "{} was paired before borrow could mount your files. Run borrow link again to set up the return direction",
-            target.name
-        );
-    };
-
-    let layout = Layout::for_project(&project);
-    let rules = mount::rules(&project, &layout);
-
-    Ok(Some(Placement {
-        setup: vec![
-            mount::ensure_mounted(&layout, &source, &keys),
-            mount::prepare(&layout, &rules),
-        ],
-        env: mount::env(&rules),
-        summary: mount::summary(&rules),
-        layout,
-    }))
+/// Show resource warnings. A failed check is ignored, because it must never block work,
+/// but an Agent that refuses the request is worth mentioning.
+pub fn show_warnings(result: anyhow::Result<Response>) {
+    match result {
+        Ok(Response::Warnings(warnings)) => {
+            for warning in warnings {
+                presentation::warning(warning);
+            }
+        }
+        Err(error) if error.downcast_ref::<Refused>().is_some() => {
+            presentation::warning(format!("Could not check Agent resources: {error:#}"))
+        }
+        _ => {}
+    }
 }
 
 /// The line printed before anything runs. Saying where the work happens is a hard
-/// requirement, and in Phase 2 that means saying where the files are too, so the
-/// artifact split is something you can see rather than something you hope for.
-fn announcement(name: &str, placement: Option<&Placement>) -> String {
+/// requirement, including which project folder and what build output moved.
+pub fn announcement(name: &str, local: Option<&Local>) -> String {
     let mut line = format!("▶ Running on {name}");
 
-    if let Some(placement) = placement {
-        line.push_str(&format!(" · {}", placement.layout.source.display()));
-
-        if let Some(summary) = &placement.summary {
-            line.push_str(&format!(" · {summary}"));
-        }
+    let Some(local) = local else {
+        return line;
+    };
+    line.push_str(&format!(" · {}", location(local)));
+    if let Some(summary) = split_summary(local) {
+        line.push_str(&format!(" · {summary}"));
     }
-
     line
+}
+
+pub fn location(local: &Local) -> String {
+    match local.cwd.is_empty() {
+        true => local.name.clone(),
+        false => format!("{}/{}", local.name, local.cwd),
+    }
+}
+
+fn split_summary(local: &Local) -> Option<String> {
+    let project = stack::Project {
+        root: local.root.clone(),
+        stacks: local.stacks.clone(),
+    };
+    let layout = Layout {
+        source: local.root.clone(),
+        artifacts: local.root.join(".borrow-artifacts"),
+    };
+    artifacts::summary(&artifacts::rules(&project, &layout))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use borrow_core::stack::{Project, Stack};
+    use borrow_core::stack::Stack;
     use std::path::PathBuf;
 
-    fn placement(stacks: Vec<Stack>) -> Placement {
-        let project = Project {
-            root: PathBuf::from("/Users/me/app"),
+    fn local(cwd: &str, stacks: Vec<Stack>) -> Local {
+        Local {
+            root: PathBuf::from("/work/app"),
+            name: "app".to_string(),
+            cwd: cwd.to_string(),
             stacks,
-        };
-        let layout = Layout::for_project(&project);
-        let rules = mount::rules(&project, &layout);
-
-        Placement {
-            setup: Vec::new(),
-            env: mount::env(&rules),
-            summary: mount::summary(&rules),
-            layout,
         }
     }
 
@@ -118,18 +122,18 @@ mod tests {
     }
 
     #[test]
-    fn inside_a_project_it_says_where_the_files_are_and_what_moved() {
+    fn inside_a_project_it_names_the_folder_and_what_moved() {
         assert_eq!(
-            announcement("archbox", Some(&placement(vec![Stack::Rust]))),
-            "▶ Running on archbox · /mnt/borrow/app · target → local disk"
+            announcement("archbox", Some(&local("crates/cli", vec![Stack::Rust]))),
+            "▶ Running on archbox · app/crates/cli · target → local disk"
         );
     }
 
     #[test]
-    fn a_project_with_no_known_stack_still_reports_its_path() {
+    fn a_project_with_no_known_stack_still_reports_its_folder() {
         assert_eq!(
-            announcement("archbox", Some(&placement(Vec::new()))),
-            "▶ Running on archbox · /mnt/borrow/app"
+            announcement("archbox", Some(&local("", Vec::new()))),
+            "▶ Running on archbox · app"
         );
     }
 }

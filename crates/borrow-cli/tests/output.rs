@@ -27,7 +27,18 @@ fn errors_use_stderr_and_respect_color_modes() {
 
 #[test]
 fn help_is_readable_and_uses_stdout() {
-    for command in [None, Some("run"), Some("health"), Some("link")] {
+    for command in [
+        None,
+        Some("run"),
+        Some("health"),
+        Some("link"),
+        Some("attach"),
+        Some("sync"),
+        Some("env"),
+        Some("ps"),
+        Some("stop"),
+        Some("top"),
+    ] {
         let mut args = vec!["--color", "never"];
         if let Some(command) = command {
             args.push(command);
@@ -48,4 +59,22 @@ fn explicit_color_applies_to_help() {
     let output = invoke(&["--color=always", "--help"], true, "dumb");
     assert!(output.status.success());
     assert!(output.stdout.contains(&0x1b));
+}
+
+#[test]
+fn internal_helpers_are_hidden_from_help() {
+    let output = invoke(&["--color", "never", "--help"], false, "xterm");
+    let help = String::from_utf8(output.stdout).unwrap();
+    for visible in ["attach", "sync", "env", "ps", "stop", "top"] {
+        assert!(help.contains(visible), "{visible} missing from help");
+    }
+    assert!(!help.contains("internal"));
+}
+
+#[test]
+fn interactive_commands_refuse_without_a_terminal() {
+    let output = invoke(&["--color", "never", "attach"], false, "xterm");
+    assert_eq!(output.status.code(), Some(1));
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(error.contains("needs an interactive terminal"), "{error}");
 }

@@ -1,9 +1,10 @@
 //! `borrow info`: what the box is.
 
-use crate::client;
+use crate::client::{self, unexpected};
 use borrow_core::config::Config;
+use borrow_core::control::{Request, Response};
 use borrow_core::presentation::{Style, capacity};
-use borrow_core::protocol::{Request, Response, Specs};
+use borrow_core::protocol::Specs;
 
 /// Use cached specifications unless a refresh is requested.
 pub async fn info(agent: Option<String>, refresh: bool) -> anyhow::Result<i32> {
@@ -13,11 +14,8 @@ pub async fn info(agent: Option<String>, refresh: bool) -> anyhow::Result<i32> {
     let specs = match (refresh, &target.specs) {
         (false, Some(cached)) => cached.clone(),
         _ => {
-            let response =
-                client::request(&target.host, target.daemon_port(), Request::Info).await?;
-
-            let Response::Info(specs) = response else {
-                anyhow::bail!("The Agent returned an unexpected response");
+            let Response::Info(specs) = client::request(&target, Request::Info).await? else {
+                return Err(unexpected());
             };
 
             let mut updated = target.clone();
@@ -87,7 +85,7 @@ mod tests {
             cores: 8,
             memory_mb: 1536,
             disk_total_mb: 10240,
-            tools: vec!["sshfs".into()],
+            tools: vec!["tmux".into()],
             gpus: vec![Gpu {
                 name: "Example GPU".into(),
                 vram_mb: Some(512),
@@ -97,7 +95,7 @@ mod tests {
         assert!(text.contains("Agent: archbox (archbox.local)"));
         assert!(text.contains("1.5 GiB"));
         assert!(text.contains("512.0 MiB"));
-        assert!(text.contains("Tools        sshfs"));
+        assert!(text.contains("Tools        tmux"));
         assert!(!text.contains('\x1b'));
         specs.gpus[0].vram_mb = None;
         assert!(render("archbox", "host", &specs, Style::new(false)).contains("Unavailable"));

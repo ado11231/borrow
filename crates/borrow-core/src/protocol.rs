@@ -1,4 +1,5 @@
-//! Client and Agent messages, sent as newline separated JSON over TCP.
+//! Pairing messages, sent as newline separated JSON over TCP. Everything after pairing
+//! uses the authenticated control channel in `control`.
 
 use serde::{Deserialize, Serialize};
 
@@ -9,16 +10,12 @@ pub const DEFAULT_PORT: u16 = 7433;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Request {
-    /// Static facts about the box. Fetched once at pairing and cached.
+    /// Retired. Older Clients sent these unauthenticated; the daemon now answers with
+    /// an instruction to update.
     Info,
-    /// What the box is doing right now.
     Health,
-    /// Trade a pairing token for an installed key. Single use.
-    ///
-    /// The Client sends its own ssh identity too, because the mount runs in the
-    /// opposite direction and the Agent has to be able to dial back. `user` is the
-    /// account the Agent will log in as, and `host_keys` let it recognise the
-    /// Client without anybody comparing a fingerprint by hand.
+    /// Trade a pairing token for an installed key. Single use. `user` and `host_keys`
+    /// describe the Client and are kept for compatibility with older Agents.
     Pair {
         token: String,
         client: String,
@@ -49,16 +46,18 @@ pub struct Paired {
     /// The box's ssh host keys, so the Client can recognise it later without
     /// anybody being asked to eyeball a fingerprint.
     pub host_keys: Vec<String>,
-    /// The Agent's own public key, for the return direction. The Client installs
-    /// this so the Agent can pull the mount. Neither private key ever moves.
+    /// Retired Phase 2 mount fields. New Agents send them empty.
+    #[serde(default)]
     pub mount_key: String,
-    /// Where the Agent keeps the private half and the hosts it trusts. Both paths
-    /// are on the Agent, so the Agent is the one that names them.
+    #[serde(default)]
     pub mount_identity_file: String,
+    #[serde(default)]
     pub mount_known_hosts: String,
-    /// The address the Client appeared to come from. Used as the mount source, so
-    /// the Agent dials back down the route it already knows works.
+    #[serde(default)]
     pub client_address: String,
+    /// The Agent's Borrow program path, so the Client can start helpers over SSH.
+    #[serde(default)]
+    pub program: Option<String>,
     pub specs: Specs,
 }
 
@@ -72,7 +71,7 @@ pub struct Specs {
     pub cores: usize,
     pub memory_mb: u64,
     pub disk_total_mb: u64,
-    /// Tooling that was found on the box, such as docker or sshfs.
+    /// Tooling that was found on the box, such as docker or tmux.
     pub tools: Vec<String>,
     /// Last, because toml cannot put a plain value after a list of tables.
     pub gpus: Vec<Gpu>,
@@ -93,6 +92,9 @@ pub struct Health {
     pub memory_total_mb: u64,
     pub swap_total_mb: u64,
     pub disk_free_mb: u64,
+    /// Free space where Borrow keeps project copies and build output.
+    #[serde(default)]
+    pub workspace_free_mb: Option<u64>,
     pub gpus: Vec<GpuHealth>,
 }
 

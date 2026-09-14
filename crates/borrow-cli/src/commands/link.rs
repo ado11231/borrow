@@ -21,7 +21,13 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
                 "Run borrow serve on the other machine".to_string(),
             ),
         },
-        preflight::ssh_server_check(),
+        match borrow_core::telemetry::is_installed("rsync") {
+            true => Check::pass("Tool available: rsync"),
+            false => Check::warn(
+                "Tool not installed: rsync (needed to copy projects)",
+                preflight::install_hint("rsync"),
+            ),
+        },
     ];
 
     if preflight::report(&checks) {
@@ -30,7 +36,7 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
 
     let (private_key, public_key) = keys::ensure(&client_name)?;
 
-    let response = client::request(
+    let response = client::pair(
         &host,
         port,
         Request::Pair {
@@ -49,7 +55,6 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
 
     let name = name.unwrap_or(paired.name.clone());
     let known_hosts = core_keys::learn_host(&host, None, &paired.host_keys)?;
-    let authorized = core_keys::authorize(&name, &paired.mount_key)?;
 
     let mut config = Config::load_or_empty()?;
     config.upsert(Agent {
@@ -60,10 +65,11 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
         daemon_port: Some(port),
         identity_file: Some(private_key.clone()),
         known_hosts: Some(known_hosts.clone()),
-        mount_user: Some(this_user()),
-        mount_host: Some(paired.client_address.clone()),
-        mount_identity_file: Some(paired.mount_identity_file.clone()),
-        mount_known_hosts: Some(paired.mount_known_hosts.clone()),
+        program: paired.program.clone(),
+        mount_user: None,
+        mount_host: None,
+        mount_identity_file: None,
+        mount_known_hosts: None,
         specs: Some(paired.specs),
     });
 
@@ -86,14 +92,8 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
     );
     borrow_core::presentation::detail("Saved", saved.display());
     eprintln!();
-    eprintln!("  Return connection so {name} can mount your files:");
-    borrow_core::presentation::detail("Authorized", authorized.display());
-    borrow_core::presentation::detail(
-        "Mount source",
-        format!("{}@{}", this_user(), paired.client_address),
-    );
-    eprintln!();
     eprintln!("  Try it:   borrow run uname -a");
+    eprintln!("  In a project, borrow run copies its source to {name} first");
     eprintln!();
 
     Ok(0)
@@ -115,7 +115,7 @@ fn parse_code(code: &str) -> anyhow::Result<(String, u16, String)> {
     Ok((host.to_string(), port, token.to_string()))
 }
 
-/// The account on this machine the Agent will log in as to pull the mount.
+/// This account's name, sent for compatibility with older Agents.
 fn this_user() -> String {
     std::env::var("USER")
         .or_else(|_| std::env::var("LOGNAME"))

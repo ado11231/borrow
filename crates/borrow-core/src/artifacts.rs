@@ -1,0 +1,199 @@
+//! Where generated build output lives on the Agent.
+//! Source copies stay small because build output is redirected to separate storage.
+
+use crate::stack::{Project, Stack};
+use std::path::{Path, PathBuf};
+
+/// Where Phase 2 SSHFS mounts appeared. Only `borrow unlink` still looks here, to
+/// release mounts left by an older pairing.
+pub const LEGACY_MOUNT_BASE: &str = "/mnt/borrow";
+
+/// A project's source copy and the separate folder its build output is sent to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Layout {
+    pub source: PathBuf,
+    pub artifacts: PathBuf,
+}
+
+/// One instruction for keeping build output out of the source copy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Rule {
+    /// Set an environment variable and the tool writes elsewhere by itself. The
+    /// tidiest kind, because nothing appears in the project at all.
+    Env { key: &'static str, value: PathBuf },
+
+    /// Link a required project directory to Agent storage.
+    Redirect { name: &'static str, target: PathBuf },
+}
+
+/// Combine split rules for every detected stack.
+pub fn rules(project: &Project, layout: &Layout) -> Vec<Rule> {
+    let mut rules = Vec::new();
+
+    for stack in &project.stacks {
+        match stack {
+            Stack::Rust => rules.push(Rule::Env {
+                key: "CARGO_TARGET_DIR",
+                value: layout.artifacts.join("target"),
+            }),
+
+            Stack::Node => rules.push(Rule::Redirect {
+                name: "node_modules",
+                target: layout.artifacts.join("node_modules"),
+            }),
+
+            Stack::Python => {
+                rules.push(Rule::Env {
+                    key: "PIP_CACHE_DIR",
+                    value: layout.artifacts.join("pip-cache"),
+                });
+                rules.push(Rule::Redirect {
+                    name: ".venv",
+                    target: layout.artifacts.join("venv"),
+                });
+            }
+        }
+    }
+
+    rules
+}
+
+/// The environment variables to put in front of the remote command.
+pub fn env(rules: &[Rule]) -> Vec<(String, String)> {
+    rules
+        .iter()
+        .filter_map(|rule| match rule {
+            Rule::Env { key, value } => Some((key.to_string(), value.display().to_string())),
+            Rule::Redirect { .. } => None,
+        })
+        .collect()
+}
+
+/// The directories the Agent has to create and link before the command runs.
+pub fn redirects(rules: &[Rule]) -> Vec<(&'static str, &Path)> {
+    rules
+        .iter()
+        .filter_map(|rule| match rule {
+            Rule::Redirect { name, target } => Some((*name, target.as_path())),
+            Rule::Env { .. } => None,
+        })
+        .collect()
+}
+
+/// Describe which generated files should use Agent storage.
+pub fn summary(rules: &[Rule]) -> Option<String> {
+    let names: Vec<&str> = rules
+        .iter()
+        .map(|rule| match rule {
+            Rule::Env { key, .. } if *key == "CARGO_TARGET_DIR" => "target",
+            Rule::Env { key, .. } if *key == "PIP_CACHE_DIR" => "pip cache",
+            Rule::Env { key, .. } => key,
+            Rule::Redirect { name, .. } => name,
+        })
+        .collect();
+
+    match names.is_empty() {
+        true => None,
+        false => Some(format!("{} → local disk", names.join(", "))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn project(stacks: Vec<Stack>) -> Project {
+        Project {
+            root: PathBuf::from("/data/projects/1/source"),
+            stacks,
+        }
+    }
+
+    fn layout() -> Layout {
+        Layout {
+            source: PathBuf::from("/data/projects/1/source"),
+            artifacts: PathBuf::from("/data/projects/1/artifacts"),
+        }
+    }
+
+    #[test]
+    fn rust_redirects_the_target_directory() {
+        let rules = rules(&project(vec![Stack::Rust]), &layout());
+
+        assert_eq!(
+            env(&rules),
+            vec![(
+                "CARGO_TARGET_DIR".to_string(),
+                "/data/projects/1/artifacts/target".to_string()
+            )]
+        );
+        assert!(redirects(&rules).is_empty());
+    }
+
+    /// npm has no environment variable for this, so a link is the only way.
+    #[test]
+    fn node_needs_a_link_because_npm_has_no_setting() {
+        let rules = rules(&project(vec![Stack::Node]), &layout());
+
+        assert!(env(&rules).is_empty());
+        assert_eq!(
+            redirects(&rules),
+            vec![(
+                "node_modules",
+                Path::new("/data/projects/1/artifacts/node_modules")
+            )]
+        );
+    }
+
+    #[test]
+    fn python_needs_both_a_variable_and_a_link() {
+        let rules = rules(&project(vec![Stack::Python]), &layout());
+
+        assert_eq!(env(&rules).len(), 1);
+        assert_eq!(redirects(&rules).len(), 1);
+    }
+
+    /// The rule that keeps source copies small. Build output must never land inside
+    /// the source folder, where it would be scanned, hashed, and backed up.
+    #[test]
+    fn no_rule_ever_points_inside_the_source_copy() {
+        let layout = layout();
+        let rules = rules(
+            &project(vec![Stack::Rust, Stack::Node, Stack::Python]),
+            &layout,
+        );
+
+        for (key, value) in env(&rules) {
+            assert!(
+                !Path::new(&value).starts_with(&layout.source),
+                "{key} points at {value}, which is inside the source copy"
+            );
+        }
+
+        for (name, target) in redirects(&rules) {
+            assert!(
+                !target.starts_with(&layout.source),
+                "{name} points at {}, which is inside the source copy",
+                target.display()
+            );
+        }
+    }
+
+    #[test]
+    fn a_project_with_no_known_stack_gets_no_rules() {
+        let rules = rules(&project(Vec::new()), &layout());
+
+        assert!(rules.is_empty());
+        assert_eq!(summary(&rules), None);
+    }
+
+    #[test]
+    fn the_summary_names_what_was_moved() {
+        let rules = rules(&project(vec![Stack::Rust, Stack::Node]), &layout());
+
+        assert_eq!(
+            summary(&rules),
+            Some("target, node_modules → local disk".to_string())
+        );
+    }
+}

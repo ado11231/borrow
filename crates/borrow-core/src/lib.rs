@@ -1,8 +1,9 @@
 //! Shared types and rules used by the Client and Agent.
 
+pub mod artifacts;
 pub mod config;
+pub mod control;
 pub mod keys;
-pub mod mount;
 pub mod preflight;
 pub mod presentation;
 pub mod protocol;

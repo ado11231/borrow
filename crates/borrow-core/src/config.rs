@@ -1,6 +1,5 @@
 //! Where the Client remembers which Agent to talk to.
 
-use crate::mount;
 use crate::protocol::{DEFAULT_PORT, Specs};
 use anyhow::Context;
 use directories::ProjectDirs;
@@ -41,13 +40,13 @@ pub struct Agent {
     pub identity_file: Option<PathBuf>,
     /// The file holding this box's ssh host keys, learned at pairing.
     pub known_hosts: Option<PathBuf>,
-    /// The account on **this** machine the Agent logs in as to pull the mount, and
-    /// the address it saw this machine arrive from. The mount runs in the opposite
-    /// direction to everything else, so it needs its own pair of coordinates.
+    /// Where the Borrow program lives on the Agent, reported at pairing.
+    #[serde(default)]
+    pub program: Option<String>,
+    /// Legacy Phase 2 mount settings. Still read so older config files load, but no
+    /// longer used for execution.
     pub mount_user: Option<String>,
     pub mount_host: Option<String>,
-    /// Paths **on the Agent**: its mount key and the hosts it trusts. Reported by
-    /// the daemon at pairing, because the machine that owns a path should name it.
     pub mount_identity_file: Option<String>,
     pub mount_known_hosts: Option<String>,
     /// What the box is, fetched once at pairing so `info` is instant.
@@ -60,26 +59,15 @@ impl Agent {
         self.daemon_port.unwrap_or(DEFAULT_PORT)
     }
 
-    /// Where the Agent should pull a local directory from, and what it needs in
-    /// order to do so. `None` means this box was paired before the mount existed,
-    /// which is a thing `link` can fix rather than an error to explain.
-    pub fn mount_source(
-        &self,
-        path: &std::path::Path,
-    ) -> Option<(mount::Source, mount::MountKeys)> {
-        let source = mount::Source {
-            user: self.mount_user.clone()?,
-            host: self.mount_host.clone()?,
-            port: None,
-            path: path.to_path_buf(),
-        };
+    /// Whether this box was paired for Phase 2 SSHFS mounts, which unlink still releases.
+    pub fn legacy_mount(&self) -> bool {
+        self.mount_user.is_some() || self.mount_identity_file.is_some()
+    }
 
-        let keys = mount::MountKeys {
-            identity_file: PathBuf::from(self.mount_identity_file.clone()?),
-            known_hosts: PathBuf::from(self.mount_known_hosts.clone()?),
-        };
-
-        Some((source, keys))
+    /// The Borrow program to start over SSH. Pairing records the Agent's own path, so a
+    /// login shell without Borrow on its PATH still works.
+    pub fn program(&self) -> &str {
+        self.program.as_deref().unwrap_or("borrow")
     }
 }
 
@@ -324,6 +312,7 @@ mod tests {
             daemon_port: None,
             identity_file: None,
             known_hosts: None,
+            program: None,
             mount_user: None,
             mount_host: None,
             mount_identity_file: None,
@@ -409,34 +398,25 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// A box paired before Phase 2 has none of the return direction saved. Saying
-    /// so plainly is better than a mount that fails in the shell with no context.
+    /// Config written during Phase 2 still loads, and is recognised as a legacy mount.
     #[test]
-    fn a_box_paired_before_the_mount_existed_has_no_source() {
-        assert!(
-            agent("archbox")
-                .mount_source(std::path::Path::new("/Users/me/app"))
-                .is_none()
+    fn a_phase_two_config_still_loads() {
+        let config = config(
+            r#"
+            [[agents]]
+            name = "archbox"
+            host = "archbox.local"
+            user = "me"
+            mount_user = "me"
+            mount_host = "100.64.0.2"
+            mount_identity_file = "/home/ado/.ssh/borrow_mount_ed25519"
+            mount_known_hosts = "/home/ado/.config/borrow/known_hosts"
+            "#,
         );
-    }
+        let agent = config.resolve(None).unwrap();
 
-    #[test]
-    fn a_paired_box_points_the_mount_back_at_this_machine() {
-        let mut agent = agent("archbox");
-        agent.mount_user = Some("me".to_string());
-        agent.mount_host = Some("100.64.0.2".to_string());
-        agent.mount_identity_file = Some("/home/ado/.ssh/borrow_mount_ed25519".to_string());
-        agent.mount_known_hosts = Some("/home/ado/.config/borrow/known_hosts".to_string());
-
-        let (source, keys) = agent
-            .mount_source(std::path::Path::new("/Users/me/app"))
-            .unwrap();
-
-        assert_eq!(source.host, "100.64.0.2");
-        assert_eq!(source.path, PathBuf::from("/Users/me/app"));
-        assert_eq!(
-            keys.identity_file,
-            PathBuf::from("/home/ado/.ssh/borrow_mount_ed25519")
-        );
+        assert!(agent.legacy_mount());
+        assert_eq!(agent.program(), "borrow");
+        assert!(!self::agent("fresh").legacy_mount());
     }
 }

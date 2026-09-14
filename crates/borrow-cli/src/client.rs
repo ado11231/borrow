@@ -1,36 +1,180 @@
-//! Client requests to the Agent. Each connection exchanges one JSON request and response.
+//! Client connections to the Agent: TCP for pairing, and authenticated SSH control for
+//! everything else.
 
+use crate::ssh::RemoteCommand;
 use anyhow::Context;
-use borrow_core::protocol::{Request, Response};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use borrow_core::config::Agent;
+use borrow_core::control::{self, Request, Response};
+use borrow_core::protocol;
+use std::process::Stdio;
+use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
+use tokio::process::{Child, ChildStdin, ChildStdout};
+use tokio::task::JoinHandle;
 
-/// Send one request to a daemon and wait for its answer. An `Error` response is
-/// turned into a real error here, so callers only ever see the happy shapes.
-pub async fn request(host: &str, port: u16, message: Request) -> anyhow::Result<Response> {
-    let mut stream = TcpStream::connect((host, port))
-        .await
-        .with_context(|| format!("Could not reach the borrow daemon at {host}:{port}"))?;
+/// Send one pairing request to a daemon and wait for its answer.
+pub async fn pair(
+    host: &str,
+    port: u16,
+    message: protocol::Request,
+) -> anyhow::Result<protocol::Response> {
+    let mut stream =
+        tokio::time::timeout(Duration::from_secs(10), TcpStream::connect((host, port)))
+            .await
+            .with_context(|| format!("Timed out reaching the borrow daemon at {host}:{port}"))?
+            .with_context(|| format!("Could not reach the borrow daemon at {host}:{port}"))?;
 
     let mut line = serde_json::to_string(&message).context("Could not encode the request")?;
     line.push('\n');
-
     stream
         .write_all(line.as_bytes())
         .await
         .context("Could not send the request")?;
 
     let mut reply = String::new();
-    BufReader::new(&mut stream)
-        .read_line(&mut reply)
+    let mut reader = BufReader::new((&mut stream).take(1024 * 1024));
+    tokio::time::timeout(Duration::from_secs(60), reader.read_line(&mut reply))
         .await
+        .context("The Agent did not answer the pairing request")?
         .context("The Agent closed the connection without answering")?;
 
-    let response: Response =
+    let response: protocol::Response =
         serde_json::from_str(reply.trim()).context("Could not understand the daemon's answer")?;
 
     match response {
-        Response::Error { message } => anyhow::bail!("{message}"),
+        protocol::Response::Error { message } => anyhow::bail!("{message}"),
         other => Ok(other),
     }
+}
+
+/// An error reported by the Agent itself, as opposed to a connection failure.
+#[derive(Debug)]
+pub struct Refused(pub String);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+/// One SSH connection to the Agent's private control socket.
+pub struct Control {
+    name: String,
+    child: Child,
+    input: ChildStdin,
+    output: ChildStdout,
+    errors: JoinHandle<Vec<u8>>,
+}
+
+impl Control {
+    pub async fn connect(agent: &Agent) -> anyhow::Result<Control> {
+        let mut remote = RemoteCommand::to(
+            agent,
+            agent.program().to_string(),
+            vec!["internal-control".to_string()],
+        );
+        remote.tty = false;
+        let mut child = tokio::process::Command::new("ssh")
+            .args(remote.to_ssh_args())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .context("Could not start ssh. Check that it is installed and on PATH")?;
+        let input = child.stdin.take().context("Missing SSH input")?;
+        let output = child.stdout.take().context("Missing SSH output")?;
+        let mut stderr = child.stderr.take().context("Missing SSH error output")?;
+        let errors = tokio::spawn(async move {
+            let mut bytes = Vec::new();
+            let _ = (&mut stderr).take(64 * 1024).read_to_end(&mut bytes).await;
+            bytes
+        });
+        Ok(Control {
+            name: agent.name.clone(),
+            child,
+            input,
+            output,
+            errors,
+        })
+    }
+
+    /// Send a request and wait for its answer. Agent errors come back as `Refused`.
+    pub async fn call(&mut self, request: Request) -> anyhow::Result<Response> {
+        let limit = match request {
+            Request::Begin { .. } | Request::Finish { .. } | Request::Inspect { .. } => {
+                Duration::from_secs(30 * 60)
+            }
+            _ => Duration::from_secs(90),
+        };
+        let exchange = async {
+            control::write_frame(&mut self.input, &request).await?;
+            control::read_frame::<_, Response>(&mut self.output).await
+        };
+        let answer = match tokio::time::timeout(limit, exchange).await {
+            Err(_) => anyhow::bail!("{} did not answer in time", self.name),
+            Ok(Ok(Some(answer))) => answer,
+            Ok(Err(error)) if matches!(self.child.try_wait(), Ok(None)) => {
+                return Err(error.context(format!(
+                    "Could not understand {}. Update Borrow on both machines",
+                    self.name
+                )));
+            }
+            Ok(Ok(None)) | Ok(Err(_)) => return Err(self.unreachable().await),
+        };
+        match answer {
+            Response::Error(message) => Err(Refused(message).into()),
+            other => Ok(other),
+        }
+    }
+
+    /// Explain why the connection ended, using what SSH or the remote helper printed.
+    async fn unreachable(&mut self) -> anyhow::Error {
+        let _ = tokio::time::timeout(Duration::from_secs(5), self.child.wait()).await;
+        let errors = tokio::time::timeout(Duration::from_secs(2), &mut self.errors)
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or_default();
+        let text = String::from_utf8_lossy(&errors);
+        let detail = text
+            .lines()
+            .map(|line| line.trim().trim_start_matches("Error:").trim())
+            .rfind(|line| !line.is_empty())
+            .unwrap_or("the SSH connection closed");
+        let hint = match detail {
+            d if d.contains("command not found") || d.contains("No such file") => {
+                ". Borrow was not found on the Agent. Run borrow link again after installing it there"
+            }
+            d if d.contains("unrecognized subcommand") => {
+                ". Borrow versions differ between the machines. Update Borrow on both machines"
+            }
+            _ => "",
+        };
+        anyhow::anyhow!("Could not reach {}: {detail}{hint}", self.name)
+    }
+
+    /// Dropping the input pipe is what closes it. The helper then exits on end of input.
+    pub async fn close(self) {
+        let Control {
+            mut child, input, ..
+        } = self;
+        drop(input);
+        let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+    }
+}
+
+/// Open a connection, send one request, and close it.
+pub async fn request(agent: &Agent, request: Request) -> anyhow::Result<Response> {
+    let mut control = Control::connect(agent).await?;
+    let answer = control.call(request).await;
+    control.close().await;
+    answer
+}
+
+pub fn unexpected() -> anyhow::Error {
+    anyhow::anyhow!("The Agent returned an unexpected response. Update Borrow on both machines")
 }

@@ -1,61 +1,107 @@
-//! `borrow unlink`: take the key back off a box and forget it.
+//! `borrow unlink`: clean up this Client's Borrow data on a box, then forget it.
 
+use crate::client::{Control, Refused};
+use crate::project;
 use crate::ssh::RemoteCommand;
 use borrow_core::config::Config;
+use borrow_core::control::{Request, Response};
 use borrow_core::keys::marker;
+use borrow_core::presentation;
 
-/// Unmount before revoking either key so live mounts can be released.
-/// Find installed keys by their Borrow markers.
+/// Remote cleanup comes first and stops the unlink when the Agent refuses, for example
+/// while this Client's projects still have a run, session, or sync in progress.
+/// Cleanup is scoped to projects this Client registered, so other Clients keep theirs.
 pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
     let mut config = Config::load()?;
     let target = config.resolve(agent.as_deref())?.clone();
     let tag = marker(&this_machine());
+    let client_root = project::client_root()?;
+    let registered = project::for_agent(&client_root, &target.name)?;
+    let ids: Vec<String> = registered.iter().map(|p| p.id.clone()).collect();
 
-    borrow_core::presentation::progress(format!(
-        "Unmounting and removing borrow's key on {}",
-        target.name
-    ));
+    presentation::progress(format!("Removing Borrow access to {}", target.name));
 
-    let unmount = RemoteCommand::to(
-        &target,
-        "sh".to_string(),
-        vec!["-c".to_string(), unmount_script()],
-    );
-
-    match unmount.execute().await {
-        Ok(0) => borrow_core::presentation::success(format!("Mounts released on {}", target.name)),
-        Ok(_) | Err(_) => borrow_core::presentation::warning(format!(
-            "Could not release mounts on {}",
+    let cleanup = async {
+        let mut control = Control::connect(&target).await?;
+        let answer = control.call(Request::Unlink { projects: ids }).await;
+        control.close().await;
+        answer
+    };
+    let mut complete = true;
+    match cleanup.await {
+        Ok(Response::Unlinked { environment_files }) => presentation::success(format!(
+            "Removed {} on {}. Source copies and backups were kept",
+            crate::transfer::count(environment_files, "environment file"),
             target.name
         )),
+        Ok(_) => return Err(crate::client::unexpected()),
+        Err(error) if error.downcast_ref::<Refused>().is_some() => {
+            anyhow::bail!("{error:#}. Nothing was unlinked")
+        }
+        Err(error) => {
+            complete = false;
+            presentation::warning(format!(
+                "{error:#}. Remote cleanup is incomplete: environment files for this machine's projects remain in Borrow storage on {}",
+                target.name
+            ));
+        }
+    }
+
+    if target.legacy_mount() {
+        let unmount = RemoteCommand::to(
+            &target,
+            "sh".to_string(),
+            vec!["-c".to_string(), unmount_script()],
+        );
+        match unmount.interactive().await {
+            Ok(0) => {
+                presentation::success(format!("Released older project mounts on {}", target.name))
+            }
+            _ => {
+                complete = false;
+                presentation::warning(format!(
+                    "Could not release older project mounts on {}",
+                    target.name
+                ))
+            }
+        }
     }
 
     let script = removal_script(&tag);
-    let remote = RemoteCommand::to(&target, "sh".to_string(), vec!["-c".to_string(), script]);
-
-    match remote.execute().await {
-        Ok(0) => borrow_core::presentation::success(format!("Key removed from {}", target.name)),
-        Ok(_) | Err(_) => borrow_core::presentation::warning(format!(
-            "Could not reach {}, so the key is still there. Remove the line ending {tag} from its ~/.ssh/authorized_keys by hand",
-            target.name
-        )),
+    let mut remote = RemoteCommand::to(&target, "sh".to_string(), vec!["-c".to_string(), script]);
+    remote.tty = false;
+    match remote.interactive().await {
+        Ok(0) => presentation::success(format!("Key removed from {}", target.name)),
+        Ok(_) | Err(_) => {
+            complete = false;
+            presentation::warning(format!(
+                "Could not reach {}, so the key is still there. Remove the line ending {tag} from its ~/.ssh/authorized_keys by hand",
+                target.name
+            ))
+        }
     }
 
     borrow_core::keys::forget_host(&target.host, target.port)?;
-    borrow_core::keys::deauthorize(&target.name)?;
-    borrow_core::presentation::success(format!(
-        "Removed {}'s key from this machine's authorized_keys",
-        target.name
-    ));
+    if target.legacy_mount() {
+        borrow_core::keys::deauthorize(&target.name)?;
+        presentation::success(format!(
+            "Removed {}'s older mount key from this machine's authorized_keys",
+            target.name
+        ));
+    }
 
     config.remove(&target.name)?;
     let saved = config.save()?;
+    if complete {
+        project::forget_agent(&client_root, &target.name)?;
+    }
 
-    borrow_core::presentation::success(format!(
-        "Forgot {}, saved {}",
-        target.name,
-        saved.display()
-    ));
+    presentation::success(format!("Forgot {}, saved {}", target.name, saved.display()));
+    if !complete {
+        presentation::warning(
+            "Remote cleanup did not finish. Pair again and unlink once the Agent is reachable to finish it",
+        );
+    }
 
     Ok(0)
 }
@@ -74,11 +120,10 @@ fn removal_script(marker: &str) -> String {
     )
 }
 
-/// Unmount everything borrow put under its mount base and take the directories
-/// away. `-z` detaches a mount even when something still has a file open in it,
-/// which is the only thing that reliably clears one that has gone stale.
+/// Release Phase 2 SSHFS mounts. `-z` detaches a mount even when something still has a
+/// file open in it, which is the only thing that reliably clears a stale one.
 fn unmount_script() -> String {
-    let base = shell_words::quote(borrow_core::mount::MOUNT_BASE);
+    let base = shell_words::quote(borrow_core::artifacts::LEGACY_MOUNT_BASE);
 
     format!(
         "[ -d {base} ] || exit 0; \
