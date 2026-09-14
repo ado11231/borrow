@@ -6,5 +6,8 @@ pub mod mount;
 pub mod preflight;
 pub mod presentation;
 pub mod protocol;
+pub mod source;
 pub mod stack;
+pub mod storage;
+pub mod sync;
 pub mod telemetry;

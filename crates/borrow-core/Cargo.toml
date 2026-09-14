@@ -6,7 +6,11 @@ edition = "2024"
 [dependencies]
 anyhow = { workspace = true }
 directories = { workspace = true }
+ignore = { workspace = true }
+rand = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 shell-words = { workspace = true }
 sysinfo = { workspace = true }
 toml = { workspace = true }
