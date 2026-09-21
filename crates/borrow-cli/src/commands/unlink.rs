@@ -1,11 +1,11 @@
 //! `borrow unlink`: clean up this Client's Borrow data on a box, then forget it.
 
-use crate::client::{Control, Refused};
+use crate::client::Refused;
 use crate::project;
 use crate::ssh::RemoteCommand;
 use borrow_core::config::Config;
 use borrow_core::control::{Request, Response};
-use borrow_core::keys::marker;
+use borrow_core::keys::{client_name, marker};
 use borrow_core::presentation;
 
 /// Remote cleanup comes first and stops the unlink when the Agent refuses, for example
@@ -14,21 +14,15 @@ use borrow_core::presentation;
 pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
     let mut config = Config::load()?;
     let target = config.resolve(agent.as_deref())?.clone();
-    let tag = marker(&this_machine());
+    let tag = marker(&client_name());
     let client_root = project::client_root()?;
     let registered = project::for_agent(&client_root, &target.name)?;
     let ids: Vec<String> = registered.iter().map(|p| p.id.clone()).collect();
 
     presentation::progress(format!("Removing Borrow access to {}", target.name));
 
-    let cleanup = async {
-        let mut control = Control::connect(&target).await?;
-        let answer = control.call(Request::Unlink { projects: ids }).await;
-        control.close().await;
-        answer
-    };
     let mut complete = true;
-    match cleanup.await {
+    match crate::client::request(&target, Request::Unlink { projects: ids }).await {
         Ok(Response::Unlinked { environment_files }) => presentation::success(format!(
             "Removed {} on {}. Source copies and backups were kept",
             crate::transfer::count(environment_files, "environment file"),
@@ -91,8 +85,4 @@ fn removal_script(marker: &str) -> String {
          t=$(mktemp) && grep -F -v -e {pattern} \"$f\" > \"$t\"; \
          cat \"$t\" > \"$f\" && rm -f \"$t\""
     )
-}
-
-fn this_machine() -> String {
-    sysinfo::System::host_name().unwrap_or_else(|| "client".to_string())
 }

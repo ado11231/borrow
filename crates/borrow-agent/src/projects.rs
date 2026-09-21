@@ -6,7 +6,6 @@ use anyhow::{Context, bail, ensure};
 use borrow_core::artifacts::{self, Layout};
 use borrow_core::control::{JobKind, MAX_ENVIRONMENT_FILE, ProjectInfo, ProjectRef, Snapshot};
 use borrow_core::source::{self, Manifest, Rules};
-use borrow_core::storage::PARTIAL_PREFIX;
 use borrow_core::sync::{self, State};
 use borrow_core::{stack, storage};
 use serde::{Deserialize, Serialize};
@@ -130,8 +129,8 @@ pub fn acquire_idle(root: &Path, paths: &Paths, metadata: &Metadata) -> anyhow::
             "{} has {} in progress (job {}). Stop it with borrow stop {} or wait for it to finish",
             metadata.name,
             describe(job.kind),
-            jobs::short(&job.id),
-            jobs::short(&job.id)
+            storage::short_id(&job.id),
+            storage::short_id(&job.id)
         );
     }
     let Some(lock) = lock else {
@@ -290,14 +289,8 @@ pub fn finish(root: &Path, lease: Lease, token: &str, manifest: Manifest) -> any
             plan.conflicts.join("\n")
         );
     }
-    let mut result = lease.before.clone();
-    for name in &plan.changes {
-        match manifest.get(name) {
-            Some(entry) => result.insert(name.clone(), entry.clone()),
-            None => result.remove(name),
-        };
-    }
-    source::check_links(&result, &rules)?;
+    let applied_manifest = sync::merge(&lease.before, &plan.changes, &manifest);
+    source::check_links(&applied_manifest, &rules)?;
     sync::apply(
         &paths.source,
         &lease.stage,
@@ -339,28 +332,6 @@ pub fn prepare_artifacts(paths: &Paths) -> anyhow::Result<Vec<(String, String)>>
 }
 
 /// Environment targets must be environment filenames in ordinary project folders.
-pub fn environment_target(target: &str) -> anyhow::Result<()> {
-    let path = storage::relative(target)?;
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .context("Invalid environment target")?;
-    ensure!(
-        source::is_environment_name(name),
-        "The target must be an environment file such as .env, .env.local, prod.env, or .envrc"
-    );
-    if let Some(parent) = target.rsplit_once('/').map(|(parent, _)| parent) {
-        ensure!(
-            !source::mandatory(parent, |_| false)
-                && !parent
-                    .split('/')
-                    .any(|part| part == "target" || part.starts_with(PARTIAL_PREFIX)),
-            "The target cannot be inside a generated or internal folder"
-        );
-    }
-    Ok(())
-}
-
 fn stored_name(target: &str) -> String {
     target.bytes().map(|b| format!("{b:02x}")).collect()
 }
@@ -376,7 +347,7 @@ pub fn env_add(
         contents.len() <= MAX_ENVIRONMENT_FILE,
         "Environment files are limited to 1 MiB"
     );
-    environment_target(target)?;
+    source::environment_target(target)?;
     let (paths, metadata) = load(root, id)?;
     let _lock = acquire_idle(root, &paths, &metadata)?;
     ensure_ready(&paths, &metadata)?;
@@ -418,7 +389,7 @@ pub fn env_list(root: &Path, id: &str) -> anyhow::Result<Vec<String>> {
 }
 
 pub fn env_remove(root: &Path, id: &str, target: &str) -> anyhow::Result<()> {
-    environment_target(target)?;
+    source::environment_target(target)?;
     let (paths, metadata) = load(root, id)?;
     let _lock = acquire_idle(root, &paths, &metadata)?;
     let names: Vec<String> = storage::read_json(&paths.names())?;
@@ -643,23 +614,6 @@ mod tests {
         assert!(fs::symlink_metadata(&link).is_err());
         assert!(!stored.exists());
         assert!(env_list(&root.0, &id).unwrap().is_empty());
-    }
-
-    #[test]
-    fn environment_targets_are_validated() {
-        for good in [".env", "api/.env.production", "deploy/prod.env", ".envrc"] {
-            assert!(environment_target(good).is_ok(), "{good}");
-        }
-        for bad in [
-            "config.json",
-            "../.env",
-            "/etc/.env",
-            "node_modules/.env",
-            ".git/.env",
-            "a/.env/b",
-        ] {
-            assert!(environment_target(bad).is_err(), "{bad}");
-        }
     }
 
     #[test]

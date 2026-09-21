@@ -74,6 +74,16 @@ pub fn agreed(base: &Manifest, one: &Manifest, other: &Manifest) -> Manifest {
     result
 }
 
+/// The receiver's manifest once a plan has been applied to it. Both machines project the
+/// result this way before reporting it, so their baselines cannot drift apart.
+pub fn merge(receiver: &Manifest, changes: &[String], sender: &Manifest) -> Manifest {
+    let mut result = receiver.clone();
+    for name in changes {
+        record(&mut result, name, sender.get(name));
+    }
+    result
+}
+
 fn record(baseline: &mut Manifest, name: &str, value: Option<&Entry>) {
     match value {
         Some(value) => baseline.insert(name.to_string(), value.clone()),

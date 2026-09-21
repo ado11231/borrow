@@ -110,43 +110,38 @@ fn ssh_server_check() -> Check {
     Check::fail("SSH server not running", fix)
 }
 
-/// A program that must be present, with the install line for this machine.
-pub fn tool_check(program: &str, state_when_missing: State) -> Check {
+/// A program the machine needs, with the install line for this machine. `needed_for`
+/// explains what stops working without it; an empty note means nothing works without it,
+/// which is what makes it a failure rather than a warning.
+pub fn tool_check(program: &str, needed_for: Option<&str>) -> Check {
     if is_installed(program) {
         return Check::pass(format!("Tool available: {program}"));
     }
 
-    let label = format!("Tool not installed: {program}");
     let fix = install_hint(program);
 
-    match state_when_missing {
-        State::Warn => Check::warn(label, fix),
-        _ => Check::fail(label, fix),
+    match needed_for {
+        Some(purpose) => Check::warn(
+            format!("Tool not installed: {program} (needed for {purpose})"),
+            fix,
+        ),
+        None => Check::fail(format!("Tool not installed: {program}"), fix),
     }
 }
 
 /// The checks `borrow serve` runs before it listens. SSH carries all work and control,
 /// rsync copies project source, and tmux is only needed once someone uses attach.
 pub fn serve_checks() -> Vec<Check> {
-    let mut checks = vec![
+    vec![
         ssh_server_check(),
-        tool_check("rsync", State::Fail),
-        match is_installed("tmux") {
-            true => Check::pass("Tool available: tmux"),
+        tool_check("rsync", None),
+        tool_check("tmux", Some("borrow attach")),
+        match is_installed("nvidia-smi") {
+            true => Check::pass("GPU reporting available"),
             false => Check::warn(
-                "Tool not installed: tmux (needed for borrow attach)",
-                install_hint("tmux"),
+                "GPU reporting unavailable",
+                "Optional when no NVIDIA GPU is installed",
             ),
         },
-    ];
-
-    checks.push(match is_installed("nvidia-smi") {
-        true => Check::pass("GPU reporting available"),
-        false => Check::warn(
-            "GPU reporting unavailable",
-            "Optional when no NVIDIA GPU is installed",
-        ),
-    });
-
-    checks
+    ]
 }

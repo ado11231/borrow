@@ -15,7 +15,7 @@ use borrow_core::protocol::{Request, Response};
 /// an entry nothing could ever remove.
 pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
     let (host, port, token) = parse_code(&code)?;
-    let client_name = this_machine();
+    let client_name = core_keys::client_name();
 
     let checks = vec![
         match preflight::is_listening(format!("{host}:{port}").parse()?) {
@@ -25,13 +25,7 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
                 "Run borrow serve on the other machine".to_string(),
             ),
         },
-        match borrow_core::telemetry::is_installed("rsync") {
-            true => Check::pass("Tool available: rsync"),
-            false => Check::warn(
-                "Tool not installed: rsync (needed to copy projects)",
-                preflight::install_hint("rsync"),
-            ),
-        },
+        preflight::tool_check("rsync", Some("copying projects")),
     ];
 
     if preflight::report(&checks) {
@@ -121,12 +115,6 @@ fn this_user() -> String {
     std::env::var("USER")
         .or_else(|_| std::env::var("LOGNAME"))
         .unwrap_or_else(|_| "unknown".to_string())
-}
-
-/// A name for this machine, used to label the key installed on the box so a human
-/// reading authorized_keys can tell where it came from.
-fn this_machine() -> String {
-    sysinfo::System::host_name().unwrap_or_else(|| "client".to_string())
 }
 
 #[cfg(test)]

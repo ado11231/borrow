@@ -19,10 +19,6 @@ const HISTORY: usize = 100;
 /// How long stopped work gets to exit on its own before it is killed.
 pub const GRACE: Duration = Duration::from_secs(5);
 
-pub fn short(id: &str) -> &str {
-    &id[..id.len().min(8)]
-}
-
 fn dir(root: &Path) -> PathBuf {
     root.join("jobs")
 }
@@ -484,7 +480,7 @@ mod tests {
         let tree = process_tree(&[pid], Some(pid));
         assert!(tree.len() >= 3, "{tree:?}");
         let started = Instant::now();
-        let stopped = stop(&root.0, short(&job.id)).unwrap();
+        let stopped = stop(&root.0, storage::short_id(&job.id)).unwrap();
         let _ = child.wait();
         assert_eq!(stopped.state, JobState::Stopped);
         assert!(started.elapsed() >= GRACE - Duration::from_millis(200));
@@ -499,7 +495,10 @@ mod tests {
         let root = Root::new();
         let me = std::process::id();
         let job = running(&root.0, Some(me), process_start(me));
-        assert_eq!(find_active(&root.0, short(&job.id)).unwrap().id, job.id);
+        assert_eq!(
+            find_active(&root.0, storage::short_id(&job.id)).unwrap().id,
+            job.id
+        );
         assert!(find_active(&root.0, "ab").is_err());
         assert!(find_active(&root.0, "../x").is_err());
     }

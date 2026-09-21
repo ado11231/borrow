@@ -29,13 +29,9 @@ pub async fn stop(agent: Option<String>, id: String) -> anyhow::Result<i32> {
     presentation::success(format!(
         "Stopped {} ({}). Source and build output were kept",
         job.command,
-        short(&job.id)
+        storage::short_id(&job.id)
     ));
     Ok(0)
-}
-
-fn short(id: &str) -> &str {
-    &id[..id.len().min(8)]
 }
 
 pub fn render(agent: &str, jobs: &[Job], all: bool, now: u64, style: Style) -> String {
@@ -79,7 +75,7 @@ pub fn render(agent: &str, jobs: &[Job], all: bool, now: u64, style: Style) -> S
             .collect();
         output.push_str(&format!(
             "  {:<8}  {:<7}  {}  {:<16}  {:<9}  {}\n",
-            short(&job.id),
+            storage::short_id(&job.id),
             kind,
             style.paint(format!("{state:<16}"), tone),
             project,

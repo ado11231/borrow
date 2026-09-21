@@ -56,6 +56,30 @@ pub fn is_environment_name(name: &str) -> bool {
     name == ".env" || name.starts_with(".env.") || name.ends_with(".env") || name == ".envrc"
 }
 
+/// Where `borrow env add` may place a file inside the Agent's copy. Both machines check
+/// this, so the Client can refuse a bad target before reading a secret off disk.
+pub fn environment_target(target: &str) -> anyhow::Result<()> {
+    let path = storage::relative(target)?;
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .context("Invalid environment target")?;
+    ensure!(
+        is_environment_name(name),
+        "The target must be an environment file such as .env, .env.local, prod.env, or .envrc"
+    );
+    if let Some(parent) = target.rsplit_once('/').map(|(parent, _)| parent) {
+        ensure!(
+            !mandatory(parent, |_| false)
+                && !parent
+                    .split('/')
+                    .any(|part| part == "target" || part.starts_with(storage::PARTIAL_PREFIX)),
+            "The target cannot be inside a generated or internal folder"
+        );
+    }
+    Ok(())
+}
+
 /// The exclusions no setting can override. `target` counts as generated only beside a
 /// `Cargo.toml`, so a source folder that happens to be called target is still copied.
 pub fn mandatory(path: &str, has_file: impl Fn(&str) -> bool) -> bool {
@@ -506,6 +530,23 @@ mod tests {
 
     fn names(manifest: &Manifest) -> Vec<&str> {
         manifest.keys().map(String::as_str).collect()
+    }
+
+    #[test]
+    fn environment_targets_are_validated() {
+        for good in [".env", "api/.env.production", "deploy/prod.env", ".envrc"] {
+            assert!(environment_target(good).is_ok(), "{good}");
+        }
+        for bad in [
+            "config.json",
+            "../.env",
+            "/etc/.env",
+            "node_modules/.env",
+            ".git/.env",
+            "a/.env/b",
+        ] {
+            assert!(environment_target(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

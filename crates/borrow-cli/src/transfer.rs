@@ -34,7 +34,7 @@ pub async fn open(agent: &Agent, local: &Local) -> anyhow::Result<Opened> {
     let reference = ProjectRef {
         id: id.clone(),
         name: local.name.clone(),
-        client: sysinfo::System::host_name().unwrap_or_else(|| "client".to_string()),
+        client: borrow_core::keys::client_name(),
     };
     let Response::Project(project) = control.call(Request::Open(reference)).await? else {
         return Err(unexpected());
@@ -193,14 +193,8 @@ pub async fn pull(opened: &mut Opened, agent: &Agent, local: &Local) -> anyhow::
                 agent.name
             );
         }
-        let mut result = local_manifest.clone();
-        for name in &plan.changes {
-            match snapshot.manifest.get(name) {
-                Some(entry) => result.insert(name.clone(), entry.clone()),
-                None => result.remove(name),
-            };
-        }
-        source::check_links(&result, &rules)?;
+        let applied_manifest = sync::merge(&local_manifest, &plan.changes, &snapshot.manifest);
+        source::check_links(&applied_manifest, &rules)?;
 
         let files = regular_files(&plan, &snapshot.manifest);
         storage::private_dir(&stage)?;
@@ -238,7 +232,7 @@ pub async fn pull(opened: &mut Opened, agent: &Agent, local: &Local) -> anyhow::
             .control
             .call(Request::Finish {
                 token: token.clone(),
-                manifest: result,
+                manifest: applied_manifest,
             })
             .await?;
         Ok(Outcome {

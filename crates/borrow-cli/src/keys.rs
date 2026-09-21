@@ -1,8 +1,7 @@
 //! Borrow uses a dedicated SSH key so unlink can revoke its access.
 
 use anyhow::Context;
-use borrow_core::keys::marker;
-use directories::BaseDirs;
+use borrow_core::keys::{marker, ssh_dir};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -10,16 +9,7 @@ use std::process::Command;
 /// The private key file. The public one is the same path with .pub on the end.
 const KEY_NAME: &str = "borrow_ed25519";
 
-/// Where ssh keeps keys. The only place in the codebase that knows this.
-fn ssh_dir() -> anyhow::Result<PathBuf> {
-    let Some(base) = BaseDirs::new() else {
-        anyhow::bail!("Could not determine home directory");
-    };
-    Ok(base.home_dir().join(".ssh"))
-}
-
-/// Path to borrow's private key.
-pub fn private_key_path() -> anyhow::Result<PathBuf> {
+fn private_key_path() -> anyhow::Result<PathBuf> {
     Ok(ssh_dir()?.join(KEY_NAME))
 }
 

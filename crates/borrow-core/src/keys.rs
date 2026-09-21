@@ -12,6 +12,12 @@ pub fn marker(client_name: &str) -> String {
     format!("borrow:{client_name}")
 }
 
+/// What this machine calls itself to an Agent. `link` labels its installed key with it and
+/// `unlink` revokes by that label, so every caller has to get the same answer.
+pub fn client_name() -> String {
+    sysinfo::System::host_name().unwrap_or_else(|| "client".to_string())
+}
+
 /// Where sshd publishes the public half of a machine's host keys.
 const HOST_KEY_DIR: &str = "/etc/ssh";
 

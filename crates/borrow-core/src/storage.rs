@@ -38,6 +38,12 @@ pub fn new_id() -> String {
     format!("{:032x}", rand::random::<u128>())
 }
 
+/// The leading part of an identifier, which is what job listings show and `borrow stop`
+/// accepts. Both sides shorten the same way so a copied prefix always matches.
+pub fn short_id(id: &str) -> &str {
+    &id[..id.len().min(8)]
+}
+
 pub fn valid_id(value: &str) -> anyhow::Result<()> {
     ensure!(
         value.len() == 32
@@ -156,17 +162,22 @@ pub fn read_json<T: DeserializeOwned + Default>(path: &Path) -> anyhow::Result<T
     }
 }
 
-/// Take an exclusive advisory lock without waiting. The lock lasts as long as the
-/// returned file stays open, and the operating system drops it if the process dies.
-pub fn try_lock(path: &Path) -> anyhow::Result<Option<File>> {
-    let file = OpenOptions::new()
+/// Open a lock file without disturbing whatever is already in it.
+fn lock_file(path: &Path) -> anyhow::Result<File> {
+    OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
         .mode(0o600)
         .open(path)
-        .with_context(|| format!("Could not open {}", path.display()))?;
+        .with_context(|| format!("Could not open {}", path.display()))
+}
+
+/// Take an exclusive advisory lock without waiting. The lock lasts as long as the
+/// returned file stays open, and the operating system drops it if the process dies.
+pub fn try_lock(path: &Path) -> anyhow::Result<Option<File>> {
+    let file = lock_file(path)?;
     match file.try_lock() {
         Ok(()) => Ok(Some(file)),
         Err(fs::TryLockError::WouldBlock) => Ok(None),
@@ -176,14 +187,7 @@ pub fn try_lock(path: &Path) -> anyhow::Result<Option<File>> {
 
 /// Take an exclusive lock, waiting for other holders. Used only for short updates.
 pub fn lock(path: &Path) -> anyhow::Result<File> {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .open(path)
-        .with_context(|| format!("Could not open {}", path.display()))?;
+    let file = lock_file(path)?;
     file.lock()?;
     Ok(file)
 }
