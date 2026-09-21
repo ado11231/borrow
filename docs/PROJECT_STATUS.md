@@ -1,6 +1,6 @@
 # Borrow Project Status
 
-Last updated: September 13, 2026
+Last updated: September 20, 2026
 
 This document explains what Borrow is, how the repository is organized, what we completed in each phase, and what comes next.
 
@@ -124,7 +124,7 @@ Lists the shared modules that the crate provides.
 
 #### `src/config.rs`
 
-Loads and saves paired Agent information: names, addresses, SSH details, the Agent's Borrow program path, cached machine specifications, and the default Agent. Older mount settings still load but are no longer used.
+Loads and saves paired Agent information: names, addresses, SSH details, the Agent's Borrow program path, cached machine specifications, and the default Agent.
 
 #### `src/protocol.rs`
 
@@ -168,7 +168,7 @@ Finds project markers and recognizes Rust, Node, Python, and projects that use m
 
 #### `src/artifacts.rs`
 
-Decides where generated files go for each stack and describes the artifact split. It also names the old mount folder that unlink still cleans up.
+Decides where generated files go for each stack and describes the artifact split.
 
 ### `borrow-agent`
 
@@ -212,7 +212,7 @@ Finds the current project and keeps the persistent project ID for each project a
 
 #### `src/transfer.rs`
 
-Runs previews, pushes, and pulls. It scans local files, plans changes, runs rsync with an explicit file list, sends heartbeats, and applies pulled files safely.
+Runs previews, pushes, and pulls. It scans local files, plans changes, runs rsync with an explicit file list, sends heartbeats, and applies pulled files safely. Pushes and pulls take and release the Agent's sync lease through one shared pair of helpers.
 
 #### `src/live.rs`
 
@@ -220,7 +220,7 @@ Draws live views that refresh every two seconds, exit on Q or Ctrl C, and restor
 
 #### `src/keys.rs`
 
-Creates and loads the dedicated Client SSH key used by Borrow.
+Creates and loads the dedicated Client SSH key used by Borrow. Where the key lives is decided once, in `borrow-core`.
 
 #### `src/ssh.rs`
 
@@ -264,7 +264,11 @@ Shows live Agent resources with active Borrow jobs.
 
 #### `src/commands/unlink.rs`
 
-Removes this Client's environment files and Borrow key from the Agent, releases older mounts, and forgets the Agent.
+Removes this Client's environment files, Borrow key, and learned host keys from the Agent, then forgets the Agent.
+
+#### `tests/output.rs`
+
+Runs the built `borrow` program and checks what a user actually sees: color modes, help, hidden internal commands, and the commands that refuse to run without a terminal.
 
 ## 6. Why We Divided the Code This Way
 
@@ -551,6 +555,38 @@ Verified on September 13, 2026 between a Mac Client and an Arch Linux Agent (arc
 
 Start a long build, close the Client, reconnect later, attach again, and return to the same running task. The user must also be able to inspect and stop that task. This was met on September 13, 2026, see the acceptance record above.
 
+## 11b. Cleanup Before Phase 4
+
+Status: Complete for local implementation and verification. Not yet run on two real machines.
+
+Done on September 20, 2026, to clear the ground before the Coordinator is built on top of it.
+
+### Four real defects, each found by reading both sides of the code
+
+1. `authorized_keys` was rewritten by truncating the file and then writing it. A crash or a full disk in between left it empty, which locks the owner out of their own machine. Both it and `known_hosts` now go through the same atomic write the rest of the project uses.
+
+2. Sync recovery read the destination's permissions through a symlink, where the matching code in the forward direction deliberately does not. Recovering a step whose destination had become a link stamped the link target's permissions onto the restored file. A test pins this, and it fails against the old code.
+
+3. The name of Borrow's temporary write files was written out as a literal in one place and as a shared constant in another. If they drifted, files being written would start being treated as project source.
+
+4. `link` learned host keys without a port and `unlink` forgot them with one. Harmless today, because nothing sets a port, and a trap as soon as something does.
+
+### Cleanup
+
+1. The retired Phase 2 mount surface is gone from config, from the pairing message, from `unlink`, and from the artifact rules. The control protocol is version 4, so machines paired before this must run `borrow link` again.
+
+2. Dead code removed: an unused preflight check, a struct field nothing read, two pairing responses nothing ever sent, and an unused dependency. Items only their own module used are no longer exported.
+
+3. Helpers that existed in two copies now have one home each in `borrow-core`: where SSH keys live, how a job ID is shortened, what this machine calls itself, how a synced manifest is projected, and which environment file targets are allowed. The last of these means the Client no longer calls into the Agent crate to validate an argument.
+
+4. Names that meant two different things were changed. `Outcome` and `State` each described two unrelated types, `artifacts::env` was about build variables rather than environment files, and `mandatory` read as required when it means excluded. Memory fields now say `mib`, which is what they always held.
+
+5. `borrow run` says `target → Agent disk` rather than `local disk`, which described the wrong machine from where the user is sitting.
+
+### Still to do
+
+Re-pair the two real machines, which the protocol bump now requires, and run the Phase 3 flows again.
+
 ## 12. Later Phases
 
 ### Phase 4
@@ -571,9 +607,9 @@ Prepare public releases, installers, packages, diagnostics, licensing, contribut
 
 ## 13. Current Verification
 
-Verified on September 14, 2026.
+Verified on September 20, 2026.
 
-The full Rust workspace builds successfully. All 146 automated tests pass, and formatting checks and Clippy pass. The Phase 3 flows were also accepted on a real Mac Client and Arch Linux Agent, recorded in section 11.
+The full Rust workspace builds successfully. All 149 automated tests pass, and formatting checks and Clippy pass. The Phase 3 flows were accepted on a real Mac Client and Arch Linux Agent, recorded in section 11, but that was before the cleanup in section 11b. Nothing since then has been run on two machines.
 
 The tests cover:
 
@@ -595,11 +631,13 @@ The tests cover:
 
 9. Control framing, version mismatches, oversized messages, and lease release when a connection closes.
 
-10. Agent selection, configuration, legacy configuration, pairing code parsing, and SSH command construction.
+10. Atomic replacement of SSH line files, host keys forgotten under the port they were learned with, and sync recovery reading permissions without following a symlink.
 
-11. Safe shell argument handling, rsync remote path escaping, and argument forwarding for hidden helpers.
+11. Agent selection, configuration, pairing code parsing, and SSH command construction.
 
-12. Terminal colors, help, errors, previews, job lists, health thresholds, quit keys, and commands that need a terminal.
+12. Safe shell argument handling, rsync remote path escaping, and argument forwarding for hidden helpers.
+
+13. Terminal colors, help, errors, previews, job lists, health thresholds, quit keys, and commands that need a terminal.
 
 A loopback test on one Mac used a private unprivileged SSH server, real rsync, and real tmux, with the Client and Agent as separate Borrow storage areas. It verified pairing, protected info and health, copying with exclusions, links, executable bits, unusual file names, subfolder runs, pushes, pulls, receiver only edits, conflicts, environment files, busy refusal, stop with grace and kill, interactive input and Ctrl C in a terminal, lost connections, attach, detach, reattach, a daemon restart with a live session, live views, and unlink.
 

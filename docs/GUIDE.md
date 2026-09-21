@@ -497,14 +497,13 @@ The practical consequences you will see in the code:
 
 ### Concurrency with tokio
 
-The runtime is `tokio`, entered with `#[tokio::main]` on `main`. Right now the program does
-not actually await anything meaningful, which is a fair criticism of the current state, but
-the runtime is in place because the very next piece of work needs it.
+The runtime is `tokio`, entered with `#[tokio::main]` on `main`, and since Phase 3 nearly
+everything past argument parsing is async: the control connection, the transfers, the live
+views, and the Agent's socket service.
 
-Here is the shape of the problem `run` is about to become, and it explains the choice
-clearly. To run a command remotely you must simultaneously forward stdout, forward stderr,
-watch for the process to exit, and watch for a local Ctrl-C so you can kill the remote
-process rather than merely detaching from it. That is four concurrent concerns in one small
+`run` is the clearest example of why. To run a command remotely you must simultaneously
+forward stdout, forward stderr, watch for the process to exit, and watch for a local Ctrl-C
+so you can kill the remote process rather than merely detaching from it. That is four concurrent concerns in one small
 function. It is precisely a `tokio::select!` problem: small enough to understand fully,
 real enough to teach the pattern, and the pattern gets reused everywhere later.
 
@@ -519,9 +518,11 @@ The convention is deliberately split by crate role.
 * **`anyhow` in binaries.** The CLI's job when something fails is to print a good message
   and exit. It does not need callers to match on error variants. `anyhow::Result` plus the
   `?` operator plus context strings gives exactly that.
-* **`thiserror` in `borrow-core`.** Once the shared library exists in Phase 2, callers will
-  want to distinguish a transfer failure from a protocol mismatch from a missing binary.
-  Library errors should be typed enums that callers can match on.
+* **`anyhow` in `borrow-core` too, for now.** Typed library errors with `thiserror` remain
+  planned rather than done. The two places that genuinely need matching already carry their
+  own types and are downcast rather than string matched: `client::Refused` for an error the
+  Agent reported, and `ssh::Disconnected` for a connection that dropped. That pattern is the
+  model for widening this later.
 
 There is a nice distinction visible in `commands/run.rs` already. Its signature is
 `anyhow::Result<i32>`, and the doc comment explains why: a non zero exit code is **not** an
@@ -757,10 +758,10 @@ Implemented today:
 6. `env add`, `env list`, and `env remove` manage environment files outside source.
 7. `ps`, `ps --all`, and `stop` manage runs and sessions from persistent records.
 8. `info` and `health` use authenticated control. `health --watch` and `top` refresh live.
-9. `unlink` removes this Client's environment files and key, and releases legacy mounts.
+9. `unlink` removes this Client's environment files, key, and learned host keys.
 10. `--agent` selects a machine. `--color auto|always|never` controls Borrow formatting.
 
-Current verification, on September 14, 2026: 146 automated tests pass, and formatting
+Current verification, on September 20, 2026: 149 automated tests pass, and formatting
 checks and Clippy pass. A loopback run on one Mac used a private unprivileged sshd, real
 rsync, and real tmux. It covered pairing, copying with exclusions, links, executable bits,
 unusual filenames, subfolder runs, pushes, pulls, receiver only edits, conflicts,
@@ -768,21 +769,31 @@ environment files, busy refusal, stop with grace and kill, Ctrl C and interactiv
 terminal, lost connections, attach, detach, reattach, a daemon restart with a live session,
 live views, and unlink.
 
-Two machine acceptance, also on September 13, 2026, ran the same flows between a Mac
+Two machine acceptance, on September 13, 2026, ran the same flows between a Mac
 Client and an Arch Linux Agent on the LAN with GNU rsync. A clean release build started
 inside `attach` finished on its own while the Client was offline for four minutes, and
 `attach` returned to the same session afterwards. A daemon restart kept the session, an
 Agent reboot marked it Interrupted, and `unlink` refused while a session was active. The
 first `run cargo build` took 9 seconds including the copy, and the next started in 1 second.
 
+A cleanup on September 20, 2026 deleted the retired Phase 2 mount surface from config and
+from the pairing message, raised the control protocol to version 4, removed dead code, gave
+duplicated helpers one home each in `borrow-core`, and renamed the identifiers that meant
+two different things. It also fixed four real defects: `authorized_keys` was rewritten by
+truncating in place, sync recovery read permissions through a symlink, the partial file
+prefix was written out twice, and `learn_host` and `forget_host` could disagree about the
+port. None of it has run on the two real machines yet.
+
 Still outstanding:
 
-1. Confirming on the real machines that a lost connection and an NVIDIA driver mismatch
+1. Re-pairing the two real machines, which the protocol bump now requires, and running the
+   Phase 3 flows again against the cleaned up tree.
+2. Confirming on the real machines that a lost connection and an NVIDIA driver mismatch
    now print Borrow's own messages. Both were fixed after acceptance.
-2. File watchers inside sessions, multiple Clients sharing one Agent account, and large
+3. File watchers inside sessions, multiple Clients sharing one Agent account, and large
    Node and Python projects.
-3. Applying split overrides from `borrow.toml`. Only `sync.exclude` is read today.
-4. Build the cross network Coordinator in Phase 4.
+4. Applying split overrides from `borrow.toml`. Only `sync.exclude` is read today.
+5. Build the cross network Coordinator in Phase 4.
 
 SSH host paths with spaces remain quoted, interactive commands request a terminal,
 and password fallback stays disabled. Borrow stores SSH options in its own configuration
@@ -862,8 +873,7 @@ This is not polish and it is not Phase 7 work. For every user who is not the aut
 checks *are* the setup experience. Each failure prints the exact command that fixes it, and
 nothing is ever auto installed.
 
-* `serve` checks: is sshd running, is `sshfs` present, is the build directory writable, is
-  GPU tooling available.
+* `serve` checks: is sshd running, are `rsync` and `tmux` present, is GPU tooling available.
 * `link` checks: can the host be reached, does a key exist and if one is generated is that
   said out loud, is the Client's own sshd enabled for the Phase 2 mount.
 * Every failure is one line: `✗ sshfs not installed  →  sudo pacman -S sshfs`

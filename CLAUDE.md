@@ -130,9 +130,10 @@ crate boundary, which makes the compiler refuse a cycle, not separate executable
 those is a Phase 7 distribution decision.
 
 Dependencies point one way only: `borrow-cli` uses both, `borrow-agent` uses core, and core
-uses nothing of ours. If the agent ever needs something from the cli, the thing belongs in
-core instead. That is how `keys::marker` ended up there, since both sides have to agree on
-how an installed key is labelled.
+uses nothing of ours. If either side ever needs something from the other, the thing belongs
+in core instead. That is how `keys::marker`, `keys::client_name`, `storage::short_id`,
+`sync::merge`, and `source::environment_target` ended up there: each is a rule both machines
+have to apply the same way.
 
 **End state, from Phase 2 onward:**
 
@@ -196,9 +197,13 @@ Each phase must leave a working, usable tool. Phase 4 gates publishing, because 
 **Phases 1 and 3 are complete.** Phase 3 replaced Phase 2's SSHFS execution with filtered
 source copies and kept its stack detection and artifact split.
 
-New pairings create only Client to Agent SSH trust and record the Agent's Borrow path.
-Legacy mount fields in config still load but are not used. `borrow unlink` releases legacy
-mounts and removes this Client's environment files, keeping source copies and backups.
+Pairing creates only Client to Agent SSH trust and records the Agent's Borrow path.
+`borrow unlink` removes the installed key, this Client's environment files, and the learned
+host keys, keeping source copies and backups.
+
+**The Phase 2 mount surface is gone.** Its fields were deleted from config and from the
+pairing message, so a config file written before that no longer loads and the machines must
+run `borrow link` again. The control protocol is at version 4.
 
 CLI output uses shared formatting in `borrow-core/src/presentation.rs`. Messages use
 sentence capitalization. CPU, RAM, GPU, and VRAM labels use uppercase. Colors have text
@@ -206,10 +211,14 @@ labels and respect terminal detection. Global `--color auto|always|never` contro
 Borrow output. Put Borrow options before `run`; later arguments belong to the remote
 command.
 
-The current suite contains 146 passing tests, and formatting and Clippy pass. The Phase 3
+The current suite contains 149 passing tests, and formatting and Clippy pass. The Phase 3
 flows were accepted on a real Mac Client and Arch Linux Agent, including a network drop
-mid build, a daemon restart, and an Agent reboot. File watchers and multiple Clients still
-need testing. `borrow.toml` split overrides are not applied yet.
+mid build, a daemon restart, and an Agent reboot.
+
+**Not yet true, do not claim otherwise.** File watchers inside sessions, several Clients
+sharing one Agent account, and large Node and Python projects are untested. `borrow.toml`
+split overrides are parsed but never applied; only `sync.exclude` is read. The cleanup
+above has not been re-run on the two real machines.
 
 The detailed file reference and completion record live in `docs/PROJECT_STATUS.md`.
 
@@ -222,7 +231,7 @@ The detailed file reference and completion record live in `docs/PROJECT_STATUS.m
 * **Config and wire messages.** `serde`, with `toml` and `serde_json`.
 * **Logging.** `tracing`.
 * **CLI.** `clap`.
-* **Telemetry.** `sysinfo` for CPU, RAM, and disk. `nvidia-smi` or `nvml-wrapper` for GPU.
+* **Telemetry.** `sysinfo` for CPU, RAM, and disk. `nvidia-smi` for GPU.
 * **Comments.** Keep necessary doc comments above items. Explain important decisions in plain language.
   Avoid em dashes and comments that repeat obvious code. Keep function bodies free of comments.
 * **Versions.** Always check the current version on crates.io. Never assume.

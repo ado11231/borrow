@@ -52,9 +52,14 @@ borrow run cargo build
 1. Setup and Phase 0: Complete. Prepared the machines and tested the idea.
 2. Phase 1: Complete. Pairing, remote commands, information, and health.
 3. Phase 2: Replaced. Its project detection and separate build output continue in Phase 3, where source copies replaced its project mount.
-4. Cleanup: Complete. Comments, CLI formatting, health colors, and documentation.
-5. Phase 3: Complete. Source copies, sync, sessions, job control, environment files, and live status, accepted on two real machines.
+4. Phase 3: Complete. Source copies, sync, sessions, job control, environment files, and live status, accepted on two real machines.
+5. Cleanup: Complete. Comments, formatting, naming, dead code, and documentation.
 6. Phase 4: Planned. Connections across networks.
 7. Phase 5: Planned. Notifications and port forwarding.
 8. Phase 6: Planned. Model workloads and broader platform support.
 9. Phase 7: Planned. Installers and public releases.
+
+## Known gaps
+
+1. `borrow.toml` reads `sync.exclude` only. Split overrides are not applied yet.
+2. File watchers in sessions, several Clients on one Agent, and large Node and Python projects are untested.
