@@ -70,7 +70,7 @@ pub fn environment_target(target: &str) -> anyhow::Result<()> {
     );
     if let Some(parent) = target.rsplit_once('/').map(|(parent, _)| parent) {
         ensure!(
-            !mandatory(parent, |_| false)
+            !always_excluded(parent, |_| false)
                 && !parent
                     .split('/')
                     .any(|part| part == "target" || part.starts_with(storage::PARTIAL_PREFIX)),
@@ -82,7 +82,7 @@ pub fn environment_target(target: &str) -> anyhow::Result<()> {
 
 /// The exclusions no setting can override. `target` counts as generated only beside a
 /// `Cargo.toml`, so a source folder that happens to be called target is still copied.
-pub fn mandatory(path: &str, has_file: impl Fn(&str) -> bool) -> bool {
+pub fn always_excluded(path: &str, has_file: impl Fn(&str) -> bool) -> bool {
     let parts: Vec<&str> = path.split('/').collect();
     parts.iter().enumerate().any(|(index, name)| {
         if is_environment_name(name)
@@ -219,7 +219,7 @@ impl Rules {
 
     /// Mandatory and extra exclusions for a single path, without `.gitignore` files.
     pub fn excluded(&self, name: &str, has_file: impl Fn(&str) -> bool) -> bool {
-        if mandatory(name, has_file) {
+        if always_excluded(name, has_file) {
             return true;
         }
         let path = Path::new(name);
@@ -408,7 +408,7 @@ pub fn scan(
             let is_dir = item.file_type().is_some_and(|t| t.is_dir());
             let name = rel.rsplit('/').next().unwrap_or(rel);
             let parent = base.join(rel).parent().map(Path::to_path_buf);
-            let generated = mandatory(name, |cargo| {
+            let generated = always_excluded(name, |cargo| {
                 parent.as_ref().is_some_and(|dir| dir.join(cargo).is_file())
             });
             !generated && !extra.matched(rel, is_dir).is_ignore()
@@ -438,7 +438,7 @@ pub fn scan(
     }
 
     for (name, value) in baseline {
-        if manifest.contains_key(name) || mandatory(name, |f| manifest.contains_key(f)) {
+        if manifest.contains_key(name) || always_excluded(name, |f| manifest.contains_key(f)) {
             continue;
         }
         if matches!(entry(root, name), Ok(Some(_))) {
@@ -553,7 +553,10 @@ mod tests {
     fn environment_names_include_templates_at_any_depth() {
         for name in [".env", ".env.local", ".env.example", "prod.env", ".envrc"] {
             assert!(is_environment_name(name), "{name}");
-            assert!(mandatory(&format!("api/deep/{name}"), |_| false), "{name}");
+            assert!(
+                always_excluded(&format!("api/deep/{name}"), |_| false),
+                "{name}"
+            );
         }
         for name in ["environment.rs", "envoy.yaml", "env", ".envy"] {
             assert!(!is_environment_name(name), "{name}");
@@ -562,12 +565,12 @@ mod tests {
 
     #[test]
     fn target_is_generated_only_beside_cargo_toml() {
-        assert!(mandatory("target/debug/app", |f| f == "Cargo.toml"));
-        assert!(mandatory("crates/a/target/x", |f| f == "crates/a/Cargo.toml"));
-        assert!(!mandatory("src/target/mod.rs", |f| f == "Cargo.toml"));
-        assert!(mandatory("web/node_modules/x/index.js", |_| false));
-        assert!(mandatory(".git/config", |_| false));
-        assert!(mandatory("a/.borrow-partial-123", |_| false));
+        assert!(always_excluded("target/debug/app", |f| f == "Cargo.toml"));
+        assert!(always_excluded("crates/a/target/x", |f| f == "crates/a/Cargo.toml"));
+        assert!(!always_excluded("src/target/mod.rs", |f| f == "Cargo.toml"));
+        assert!(always_excluded("web/node_modules/x/index.js", |_| false));
+        assert!(always_excluded(".git/config", |_| false));
+        assert!(always_excluded("a/.borrow-partial-123", |_| false));
     }
 
     #[test]

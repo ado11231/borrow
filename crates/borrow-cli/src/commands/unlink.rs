@@ -25,7 +25,7 @@ pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
     match crate::client::request(&target, Request::Unlink { projects: ids }).await {
         Ok(Response::Unlinked { environment_files }) => presentation::success(format!(
             "Removed {} on {}. Source copies and backups were kept",
-            crate::transfer::count(environment_files, "environment file"),
+            presentation::plural(environment_files, "environment file"),
             target.name
         )),
         Ok(_) => return Err(crate::client::unexpected()),

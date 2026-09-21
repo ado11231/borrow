@@ -44,7 +44,7 @@ pub fn short_id(id: &str) -> &str {
     &id[..id.len().min(8)]
 }
 
-pub fn valid_id(value: &str) -> anyhow::Result<()> {
+pub fn check_id(value: &str) -> anyhow::Result<()> {
     ensure!(
         value.len() == 32
             && value
@@ -252,9 +252,9 @@ mod tests {
 
     #[test]
     fn identifiers_are_lowercase_hex_of_fixed_length() {
-        assert!(valid_id(&new_id()).is_ok());
-        assert!(valid_id("ABCDEF0123456789abcdef0123456789").is_err());
-        assert!(valid_id("../../../../etc").is_err());
+        assert!(check_id(&new_id()).is_ok());
+        assert!(check_id("ABCDEF0123456789abcdef0123456789").is_err());
+        assert!(check_id("../../../../etc").is_err());
     }
 
     #[test]

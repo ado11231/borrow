@@ -55,7 +55,7 @@ pub fn rules(project: &Project, layout: &Layout) -> Vec<Rule> {
 }
 
 /// The environment variables to put in front of the remote command.
-pub fn env(rules: &[Rule]) -> Vec<(String, String)> {
+pub fn variables(rules: &[Rule]) -> Vec<(String, String)> {
     rules
         .iter()
         .filter_map(|rule| match rule {
@@ -90,7 +90,7 @@ pub fn summary(rules: &[Rule]) -> Option<String> {
 
     match names.is_empty() {
         true => None,
-        false => Some(format!("{} → local disk", names.join(", "))),
+        false => Some(format!("{} → Agent disk", names.join(", "))),
     }
 }
 
@@ -117,7 +117,7 @@ mod tests {
         let rules = rules(&project(vec![Stack::Rust]), &layout());
 
         assert_eq!(
-            env(&rules),
+            variables(&rules),
             vec![(
                 "CARGO_TARGET_DIR".to_string(),
                 "/data/projects/1/artifacts/target".to_string()
@@ -131,7 +131,7 @@ mod tests {
     fn node_needs_a_link_because_npm_has_no_setting() {
         let rules = rules(&project(vec![Stack::Node]), &layout());
 
-        assert!(env(&rules).is_empty());
+        assert!(variables(&rules).is_empty());
         assert_eq!(
             redirects(&rules),
             vec![(
@@ -145,7 +145,7 @@ mod tests {
     fn python_needs_both_a_variable_and_a_link() {
         let rules = rules(&project(vec![Stack::Python]), &layout());
 
-        assert_eq!(env(&rules).len(), 1);
+        assert_eq!(variables(&rules).len(), 1);
         assert_eq!(redirects(&rules).len(), 1);
     }
 
@@ -159,7 +159,7 @@ mod tests {
             &layout,
         );
 
-        for (key, value) in env(&rules) {
+        for (key, value) in variables(&rules) {
             assert!(
                 !Path::new(&value).starts_with(&layout.source),
                 "{key} points at {value}, which is inside the source copy"
@@ -189,7 +189,7 @@ mod tests {
 
         assert_eq!(
             summary(&rules),
-            Some("target, node_modules → local disk".to_string())
+            Some("target, node_modules → Agent disk".to_string())
         );
     }
 }

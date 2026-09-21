@@ -24,7 +24,7 @@ const FIRST_REQUEST: Duration = Duration::from_secs(15);
 /// vanished Client releases its lease within this time.
 const IDLE: Duration = Duration::from_secs(90);
 
-const WRITE: Duration = Duration::from_secs(30);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Agent storage, separate from any Client data kept on the same machine.
 pub fn root() -> anyhow::Result<PathBuf> {
@@ -104,8 +104,11 @@ async fn connection(
                 Err(_) | Ok(Ok(None)) => break,
                 Ok(Err(error)) => {
                     let reply = Response::Error(format!("{error:#}"));
-                    let _ = tokio::time::timeout(WRITE, control::write_frame(&mut writer, &reply))
-                        .await;
+                    let _ = tokio::time::timeout(
+                        WRITE_TIMEOUT,
+                        control::write_frame(&mut writer, &reply),
+                    )
+                    .await;
                     break;
                 }
                 Ok(Ok(Some(request))) => request,
@@ -115,7 +118,7 @@ async fn connection(
             dispatch(request, root.clone(), name.clone(), lease.take()).await;
         lease = returned;
         let reply = response.unwrap_or_else(|error| Response::Error(format!("{error:#}")));
-        tokio::time::timeout(WRITE, control::write_frame(&mut writer, &reply))
+        tokio::time::timeout(WRITE_TIMEOUT, control::write_frame(&mut writer, &reply))
             .await
             .context("Timed out answering a control request")??;
     }
@@ -126,18 +129,19 @@ async fn connection(
     Ok(())
 }
 
-type Outcome = (anyhow::Result<Response>, Option<projects::Lease>);
+type Handled = (anyhow::Result<Response>, Option<projects::Lease>);
 
 async fn dispatch(
     request: Request,
     root: Arc<PathBuf>,
     name: Arc<String>,
     lease: Option<projects::Lease>,
-) -> Outcome {
+) -> Handled {
     if let Request::Ping = request {
         return (Ok(Response::Pong), lease);
     }
-    let joined = tokio::task::spawn_blocking(move || handle(&root, &name, request, lease)).await;
+    let joined =
+        tokio::task::spawn_blocking(move || with_lease(&root, &name, request, lease)).await;
     match joined {
         Ok(outcome) => outcome,
         Err(_) => (
@@ -149,7 +153,12 @@ async fn dispatch(
     }
 }
 
-fn handle(root: &Path, name: &str, request: Request, lease: Option<projects::Lease>) -> Outcome {
+fn with_lease(
+    root: &Path,
+    name: &str,
+    request: Request,
+    lease: Option<projects::Lease>,
+) -> Handled {
     match request {
         Request::Begin {
             project,
@@ -185,11 +194,11 @@ fn handle(root: &Path, name: &str, request: Request, lease: Option<projects::Lea
             ),
             _ => (Ok(Response::Done), None),
         },
-        other => (answer(root, name, other), lease),
+        other => (respond(root, name, other), lease),
     }
 }
 
-fn answer(root: &Path, name: &str, request: Request) -> anyhow::Result<Response> {
+fn respond(root: &Path, name: &str, request: Request) -> anyhow::Result<Response> {
     Ok(match request {
         Request::Info => Response::Info(telemetry::specs(name)),
         Request::Health => Response::Health(telemetry::health(Some(root))),
@@ -210,7 +219,9 @@ fn answer(root: &Path, name: &str, request: Request) -> anyhow::Result<Response>
             projects::env_add(root, &project, &target, &contents, replace)?;
             Response::Done
         }
-        Request::EnvList { project } => Response::Names(projects::env_list(root, &project)?),
+        Request::EnvList { project } => {
+            Response::EnvironmentFiles(projects::env_list(root, &project)?)
+        }
         Request::EnvRemove { project, target } => {
             projects::env_remove(root, &project, &target)?;
             Response::Done

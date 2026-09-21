@@ -214,9 +214,9 @@ mod tests {
         assert_eq!(marker("laptop"), "borrow:laptop");
     }
 
-    /// The bug this guards against: the Agent names its mount key `borrow:mount`,
-    /// but the Client revokes it by the Agent's name. Written verbatim, the key
-    /// installs fine and then cannot ever be removed.
+    /// The bug this guards against: a key arrives already carrying somebody else's
+    /// marker, and is revoked by this peer's name. Stored verbatim, it installs fine
+    /// and then cannot ever be removed.
     #[test]
     fn an_authorized_line_ends_with_the_marker_used_to_revoke_it() {
         let key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 borrow:mount";

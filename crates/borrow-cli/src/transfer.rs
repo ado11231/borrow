@@ -12,7 +12,7 @@ use borrow_core::control::{ProjectInfo, ProjectRef, Request, Response, Snapshot}
 use borrow_core::presentation::{self, Style, Tone};
 use borrow_core::source::{self, Manifest, Rules};
 use borrow_core::storage;
-use borrow_core::sync::{self, Plan, State};
+use borrow_core::sync::{self, Plan, StateDir};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -21,14 +21,14 @@ use tokio::io::AsyncReadExt;
 /// Ping interval while rsync runs, so the Agent keeps the lease for a live Client.
 const HEARTBEAT: Duration = Duration::from_secs(20);
 
-pub struct Opened {
+pub struct ProjectSession {
     pub control: Control,
     pub project: ProjectInfo,
     pub id: String,
 }
 
 /// Connect to the Agent and make sure the project has storage there.
-pub async fn open(agent: &Agent, local: &Local) -> anyhow::Result<Opened> {
+pub async fn open(agent: &Agent, local: &Local) -> anyhow::Result<ProjectSession> {
     let id = project::identify(&project::client_root()?, &local.root, &agent.name)?;
     let mut control = Control::connect(agent).await?;
     let reference = ProjectRef {
@@ -39,7 +39,7 @@ pub async fn open(agent: &Agent, local: &Local) -> anyhow::Result<Opened> {
     let Response::Project(project) = control.call(Request::Open(reference)).await? else {
         return Err(unexpected());
     };
-    Ok(Opened {
+    Ok(ProjectSession {
         control,
         project,
         id,
@@ -53,21 +53,21 @@ pub enum Direction {
 }
 
 #[derive(Default)]
-pub struct Outcome {
+pub struct SyncResult {
     pub changed: usize,
     pub kept: usize,
 }
 
 /// Finish or undo an interrupted pull on this machine before its source is read again.
 async fn recover_local(local: &Local, id: &str) -> anyhow::Result<()> {
-    let state = State::new(state_dir(id)?);
+    let state = StateDir::new(state_dir(id)?);
     let root = local.root.clone();
     tokio::task::spawn_blocking(move || sync::recover(&root, &state)).await?
 }
 
 /// Preview a sync without taking a lease or changing anything.
 pub async fn preview(
-    opened: &mut Opened,
+    opened: &mut ProjectSession,
     agent: &Agent,
     local: &Local,
     direction: Direction,
@@ -96,7 +96,7 @@ pub async fn preview(
     };
     print!(
         "{}",
-        describe(
+        preview_text(
             &plan,
             sender,
             receiver,
@@ -109,7 +109,11 @@ pub async fn preview(
 }
 
 /// Copy Client edits to the Agent. Nothing is printed unless files move.
-pub async fn push(opened: &mut Opened, agent: &Agent, local: &Local) -> anyhow::Result<Outcome> {
+pub async fn push(
+    opened: &mut ProjectSession,
+    agent: &Agent,
+    local: &Local,
+) -> anyhow::Result<SyncResult> {
     recover_local(local, &opened.id).await?;
     let excludes = source::client_excludes(&local.root)?;
     let snapshot = begin(opened, &excludes, false).await?;
@@ -126,7 +130,7 @@ pub async fn push(opened: &mut Opened, agent: &Agent, local: &Local) -> anyhow::
         if !files.is_empty() {
             presentation::progress(format!(
                 "Copying {} to {}",
-                count(files.len(), "file"),
+                presentation::plural(files.len(), "file"),
                 agent.name
             ));
             let transfer = rsync(
@@ -148,7 +152,7 @@ pub async fn push(opened: &mut Opened, agent: &Agent, local: &Local) -> anyhow::
         else {
             return Err(unexpected());
         };
-        Ok(Outcome {
+        Ok(SyncResult {
             changed,
             kept: plan.kept.len(),
         })
@@ -161,7 +165,7 @@ pub async fn push(opened: &mut Opened, agent: &Agent, local: &Local) -> anyhow::
     if outcome.changed > 0 {
         presentation::success(format!(
             "Synced {} to {}",
-            count(outcome.changed, "change"),
+            presentation::plural(outcome.changed, "change"),
             agent.name
         ));
     }
@@ -169,11 +173,15 @@ pub async fn push(opened: &mut Opened, agent: &Agent, local: &Local) -> anyhow::
 }
 
 /// Copy Agent edits back to the Client.
-pub async fn pull(opened: &mut Opened, agent: &Agent, local: &Local) -> anyhow::Result<Outcome> {
+pub async fn pull(
+    opened: &mut ProjectSession,
+    agent: &Agent,
+    local: &Local,
+) -> anyhow::Result<SyncResult> {
     recover_local(local, &opened.id).await?;
     let excludes = source::client_excludes(&local.root)?;
     let state_dir = state_dir(&opened.id)?;
-    let state = State::new(&state_dir);
+    let state = StateDir::new(&state_dir);
 
     let snapshot = begin(opened, &excludes, true).await?;
     let token = snapshot
@@ -201,7 +209,7 @@ pub async fn pull(opened: &mut Opened, agent: &Agent, local: &Local) -> anyhow::
         if !files.is_empty() {
             presentation::progress(format!(
                 "Copying {} from {}",
-                count(files.len(), "file"),
+                presentation::plural(files.len(), "file"),
                 agent.name
             ));
             let transfer = rsync(
@@ -222,7 +230,7 @@ pub async fn pull(opened: &mut Opened, agent: &Agent, local: &Local) -> anyhow::
                 snapshot.manifest.clone(),
                 token.clone(),
             );
-            let state = State::new(&state.dir);
+            let state = StateDir::new(&state.dir);
             tokio::task::spawn_blocking(move || {
                 sync::apply(&root, &stage, &state, &plan, &receiver, &sender, &token)
             })
@@ -235,7 +243,7 @@ pub async fn pull(opened: &mut Opened, agent: &Agent, local: &Local) -> anyhow::
                 manifest: applied_manifest,
             })
             .await?;
-        Ok(Outcome {
+        Ok(SyncResult {
             changed: plan.changes.len(),
             kept: plan.kept.len(),
         })
@@ -248,7 +256,11 @@ pub async fn pull(opened: &mut Opened, agent: &Agent, local: &Local) -> anyhow::
     result
 }
 
-async fn begin(opened: &mut Opened, excludes: &[String], pull: bool) -> anyhow::Result<Snapshot> {
+async fn begin(
+    opened: &mut ProjectSession,
+    excludes: &[String],
+    pull: bool,
+) -> anyhow::Result<Snapshot> {
     match opened
         .control
         .call(Request::Begin {
@@ -264,7 +276,7 @@ async fn begin(opened: &mut Opened, excludes: &[String], pull: bool) -> anyhow::
 }
 
 fn state_dir(id: &str) -> anyhow::Result<PathBuf> {
-    storage::valid_id(id)?;
+    storage::check_id(id)?;
     let dir = project::client_root()?.join("projects").join(id);
     storage::private_dir(&dir)?;
     Ok(dir)
@@ -411,15 +423,8 @@ async fn with_heartbeat(
     }
 }
 
-pub fn count(n: usize, noun: &str) -> String {
-    match n {
-        1 => format!("1 {noun}"),
-        _ => format!("{n} {noun}s"),
-    }
-}
-
 /// A readable preview of a plan. Words, not symbols, say what would happen.
-pub fn describe(
+pub fn preview_text(
     plan: &Plan,
     sender: &Manifest,
     receiver: &Manifest,
@@ -458,12 +463,12 @@ pub fn describe(
     }
     output.push_str(&format!(
         "\n  {} would be applied. Nothing was changed\n",
-        count(plan.changes.len(), "change")
+        presentation::plural(plan.changes.len(), "change")
     ));
     if !plan.conflicts.is_empty() {
         output.push_str(&format!(
             "  {} must be resolved first\n",
-            count(plan.conflicts.len(), "conflict")
+            presentation::plural(plan.conflicts.len(), "conflict")
         ));
     }
     output
@@ -501,7 +506,7 @@ mod tests {
             ("mine".into(), file("m")),
         ]);
         let plan = sync::plan(&base, &sender, &receiver);
-        let text = describe(
+        let text = preview_text(
             &plan,
             &sender,
             &receiver,

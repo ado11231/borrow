@@ -17,7 +17,7 @@ const INTERESTING_TOOLS: &[&str] = &[
     "nvidia-smi",
 ];
 
-const BYTES_PER_MB: u64 = 1024 * 1024;
+const BYTES_PER_MIB: u64 = 1024 * 1024;
 
 /// Static facts about the box. `name` is passed in rather than read from the machine,
 /// because it is chosen at pairing and should not drift if the hostname changes.
@@ -38,8 +38,8 @@ pub fn specs(name: &str) -> Specs {
         kernel: System::kernel_version().unwrap_or_else(|| "unknown".to_string()),
         cpu,
         cores: sys.cpus().len(),
-        memory_mb: sys.total_memory() / BYTES_PER_MB,
-        disk_total_mb: root_disk().map(|(total, _)| total).unwrap_or(0) / BYTES_PER_MB,
+        memory_mib: sys.total_memory() / BYTES_PER_MIB,
+        disk_total_mib: root_disk().map(|(total, _)| total).unwrap_or(0) / BYTES_PER_MIB,
         gpus: gpu_specs(),
         tools: INTERESTING_TOOLS
             .iter()
@@ -53,7 +53,7 @@ pub fn specs(name: &str) -> Specs {
 const MEMORY_WARNING_PERCENT: u64 = 90;
 
 /// Less free workspace space than this produces a warning before new work starts.
-pub const DISK_WARNING_MB: u64 = 2 * 1024;
+pub const DISK_WARNING_MIB: u64 = 2 * 1024;
 
 /// A live snapshot. CPU usage needs two samples with a gap between them, because a
 /// percentage is a change over time and a single reading has nothing to compare to.
@@ -68,13 +68,13 @@ pub fn health(workspace: Option<&Path>) -> Health {
 
     Health {
         cpu_percent: sys.global_cpu_usage(),
-        memory_used_mb: sys.used_memory() / BYTES_PER_MB,
-        memory_total_mb: sys.total_memory() / BYTES_PER_MB,
-        swap_total_mb: sys.total_swap() / BYTES_PER_MB,
-        disk_free_mb: root_disk().map(|(_, free)| free).unwrap_or(0) / BYTES_PER_MB,
-        workspace_free_mb: workspace
-            .and_then(free_space)
-            .map(|free| free / BYTES_PER_MB),
+        memory_used_mib: sys.used_memory() / BYTES_PER_MIB,
+        memory_total_mib: sys.total_memory() / BYTES_PER_MIB,
+        swap_total_mib: sys.total_swap() / BYTES_PER_MIB,
+        disk_free_mib: root_disk().map(|(_, free)| free).unwrap_or(0) / BYTES_PER_MIB,
+        workspace_free_mib: workspace
+            .and_then(free_bytes)
+            .map(|free| free / BYTES_PER_MIB),
         gpus,
         gpu_problem,
     }
@@ -86,27 +86,30 @@ pub fn warnings(workspace: &Path) -> Vec<String> {
     let mut sys = System::new();
     sys.refresh_memory();
     resource_warnings(
-        sys.used_memory() / BYTES_PER_MB,
-        sys.total_memory() / BYTES_PER_MB,
-        free_space(workspace).map(|free| free / BYTES_PER_MB),
+        sys.used_memory() / BYTES_PER_MIB,
+        sys.total_memory() / BYTES_PER_MIB,
+        free_bytes(workspace).map(|free| free / BYTES_PER_MIB),
     )
 }
 
 pub fn resource_warnings(
-    used_mb: u64,
-    total_mb: u64,
-    workspace_free_mb: Option<u64>,
+    used_mib: u64,
+    total_mib: u64,
+    workspace_free_mib: Option<u64>,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
-    if total_mb > 0 && used_mb <= total_mb && used_mb * 100 >= total_mb * MEMORY_WARNING_PERCENT {
+    if total_mib > 0
+        && used_mib <= total_mib
+        && used_mib * 100 >= total_mib * MEMORY_WARNING_PERCENT
+    {
         warnings.push(format!(
             "RAM is {}% used ({} free). The job may run slowly or be stopped",
-            used_mb * 100 / total_mb,
-            capacity(total_mb - used_mb)
+            used_mib * 100 / total_mib,
+            capacity(total_mib - used_mib)
         ));
     }
-    if let Some(free) = workspace_free_mb
-        && free < DISK_WARNING_MB
+    if let Some(free) = workspace_free_mib
+        && free < DISK_WARNING_MIB
     {
         warnings.push(format!(
             "Only {} free on the Agent workspace disk. Builds may fail",
@@ -117,7 +120,7 @@ pub fn resource_warnings(
 }
 
 /// Available bytes on the file system holding `path`, chosen by the longest mount point.
-pub fn free_space(path: &Path) -> Option<u64> {
+pub fn free_bytes(path: &Path) -> Option<u64> {
     let path = path.canonicalize().ok()?;
     let disks = Disks::new_with_refreshed_list();
     disks
@@ -204,7 +207,7 @@ fn gpu_specs() -> Vec<Gpu> {
         .into_iter()
         .map(|row| Gpu {
             name: row.first().cloned().unwrap_or_else(|| "gpu".to_string()),
-            vram_mb: row.get(1).and_then(|v| v.parse().ok()),
+            vram_mib: row.get(1).and_then(|v| v.parse().ok()),
         })
         .collect()
 }
@@ -218,8 +221,8 @@ fn gpu_health() -> (Vec<GpuHealth>, Option<String>) {
         .into_iter()
         .map(|row| GpuHealth {
             name: row.first().cloned().unwrap_or_else(|| "gpu".to_string()),
-            vram_free_mb: row.get(1).and_then(|v| v.parse().ok()),
-            vram_total_mb: row.get(2).and_then(|v| v.parse().ok()),
+            vram_free_mib: row.get(1).and_then(|v| v.parse().ok()),
+            vram_total_mib: row.get(2).and_then(|v| v.parse().ok()),
             utilization_percent: row.get(3).and_then(|v| v.parse().ok()),
             temperature_c: row.get(4).and_then(|v| v.parse().ok()),
         })
@@ -265,8 +268,8 @@ mod tests {
     }
 
     #[test]
-    fn free_space_is_measured_for_an_existing_path() {
-        assert!(free_space(&std::env::temp_dir()).is_some());
-        assert!(free_space(Path::new("/definitely/not/here")).is_none());
+    fn free_bytes_is_measured_for_an_existing_path() {
+        assert!(free_bytes(&std::env::temp_dir()).is_some());
+        assert!(free_bytes(Path::new("/definitely/not/here")).is_none());
     }
 }

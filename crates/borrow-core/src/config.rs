@@ -347,12 +347,12 @@ mod tests {
             kernel: "6.9.1".to_string(),
             cpu: "Ryzen 5".to_string(),
             cores: 12,
-            memory_mb: 32000,
-            disk_total_mb: 900000,
+            memory_mib: 32000,
+            disk_total_mib: 900000,
             tools: vec!["docker".to_string()],
             gpus: vec![crate::protocol::Gpu {
                 name: "RTX 3070".to_string(),
-                vram_mb: Some(8192),
+                vram_mib: Some(8192),
             }],
         });
 

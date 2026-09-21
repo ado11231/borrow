@@ -86,6 +86,14 @@ impl Style {
     }
 }
 
+/// `1 file` or `3 files`: the plural form English needs for a count in a sentence.
+pub fn plural(count: usize, noun: &str) -> String {
+    match count {
+        1 => format!("1 {noun}"),
+        _ => format!("{count} {noun}s"),
+    }
+}
+
 /// One indented `label   value` line. Colourless on purpose: the label is structure, and
 /// any emphasis belongs to the value the caller passes in.
 pub fn row(label: &str, value: impl std::fmt::Display) -> String {
@@ -117,7 +125,7 @@ pub fn detail(label: &str, value: impl std::fmt::Display) {
     eprint!("{}", row(label, value));
 }
 
-/// Protocol memory fields contain MiB despite their historical mb names.
+/// A byte count in MiB, shown as MiB or GiB depending on size.
 pub fn capacity(mib: u64) -> String {
     if mib < 1024 {
         format!("{:.1} MiB", mib as f64)

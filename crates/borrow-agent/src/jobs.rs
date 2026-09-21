@@ -24,7 +24,7 @@ fn dir(root: &Path) -> PathBuf {
 }
 
 fn record(root: &Path, id: &str) -> anyhow::Result<PathBuf> {
-    storage::valid_id(id)?;
+    storage::check_id(id)?;
     Ok(dir(root).join(format!("{id}.json")))
 }
 
@@ -95,7 +95,7 @@ pub fn list(root: &Path, all: bool) -> anyhow::Result<Vec<Job>> {
         let Some(id) = name.strip_suffix(".json") else {
             continue;
         };
-        if storage::valid_id(id).is_err() {
+        if storage::check_id(id).is_err() {
             continue;
         }
         let Ok(mut job) = serde_json::from_slice::<Job>(&fs::read(item.path())?) else {

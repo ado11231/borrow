@@ -92,13 +92,13 @@ fn record(baseline: &mut Manifest, name: &str, value: Option<&Entry>) {
 }
 
 /// Where one side keeps synchronization state for a project.
-pub struct State {
+pub struct StateDir {
     pub dir: PathBuf,
 }
 
-impl State {
-    pub fn new(dir: impl Into<PathBuf>) -> State {
-        State { dir: dir.into() }
+impl StateDir {
+    pub fn new(dir: impl Into<PathBuf>) -> StateDir {
+        StateDir { dir: dir.into() }
     }
 
     pub fn baseline_file(&self) -> PathBuf {
@@ -146,7 +146,7 @@ struct Step {
 pub fn apply(
     root: &Path,
     stage: &Path,
-    state: &State,
+    state: &StateDir,
     plan: &Plan,
     receiver: &Manifest,
     sender: &Manifest,
@@ -382,7 +382,7 @@ fn remove_empty_parents(root: &Path, name: &str) {
 /// remains. Otherwise each path is returned to its previous state from the backup.
 /// A path that matches neither the old nor the new state was edited afterwards, so it
 /// is left untouched and recovery stops with instructions.
-pub fn recover(root: &Path, state: &State) -> anyhow::Result<()> {
+pub fn recover(root: &Path, state: &StateDir) -> anyhow::Result<()> {
     if !state.interrupted() {
         return Ok(());
     }
@@ -461,7 +461,7 @@ fn undo_step(root: &Path, journal: &Journal, step: &Step) -> anyhow::Result<()> 
     Ok(())
 }
 
-fn prune_backups(state: &State) {
+fn prune_backups(state: &StateDir) {
     let Ok(items) = fs::read_dir(state.backups()) else {
         return;
     };
@@ -638,7 +638,7 @@ mod tests {
         }
 
         fn sync(&self) -> anyhow::Result<Plan> {
-            let state = State::new(self.state.path());
+            let state = StateDir::new(self.state.path());
             let base = state.baseline()?;
             let sender = self.scan(&self.sender, &base);
             let receiver = self.scan(&self.receiver, &base);
@@ -690,11 +690,11 @@ mod tests {
         assert_eq!(plan.changes, ["old.txt", "src/main.rs"]);
         assert!(!receiver.join("old.txt").exists());
         assert!(receiver.join("receiver_only.txt").exists());
-        let backups: Vec<_> = fs::read_dir(State::new(sides.state.path()).backups())
+        let backups: Vec<_> = fs::read_dir(StateDir::new(sides.state.path()).backups())
             .unwrap()
             .collect();
         assert_eq!(backups.len(), 1);
-        assert!(!State::new(sides.state.path()).interrupted());
+        assert!(!StateDir::new(sides.state.path()).interrupted());
     }
 
     #[test]
@@ -717,7 +717,7 @@ mod tests {
     fn a_destination_edited_after_planning_is_not_overwritten() {
         let sides = Sides::new();
         sides.sender.write("a.txt", "one");
-        let state = State::new(sides.state.path());
+        let state = StateDir::new(sides.state.path());
         let sender = sides.scan(&sides.sender, &Manifest::new());
         let receiver = sides.scan(&sides.receiver, &Manifest::new());
         let plan = plan(&Manifest::new(), &sender, &receiver);
@@ -745,7 +745,7 @@ mod tests {
     fn a_staged_file_that_does_not_match_is_rejected() {
         let sides = Sides::new();
         sides.sender.write("a.txt", "one");
-        let state = State::new(sides.state.path());
+        let state = StateDir::new(sides.state.path());
         let sender = sides.scan(&sides.sender, &Manifest::new());
         let plan = plan(&Manifest::new(), &sender, &Manifest::new());
         sides.sender.write("a.txt", "tampered");
@@ -783,7 +783,7 @@ mod tests {
             "one"
         );
         assert_eq!(fs::read_to_string(locked.join("b.txt")).unwrap(), "one");
-        assert!(!State::new(sides.state.path()).interrupted());
+        assert!(!StateDir::new(sides.state.path()).interrupted());
     }
 
     #[test]
@@ -792,7 +792,7 @@ mod tests {
         sides.sender.write("a.txt", "one");
         sides.sender.write("gone.txt", "bye");
         sides.sync().unwrap();
-        let state = State::new(sides.state.path());
+        let state = StateDir::new(sides.state.path());
         let before = state.baseline().unwrap();
         let receiver = sides.receiver.path();
 
@@ -848,7 +848,7 @@ mod tests {
     fn recovery_after_the_commit_point_keeps_the_new_state() {
         let sides = Sides::new();
         sides.sender.write("a.txt", "one");
-        let state = State::new(sides.state.path());
+        let state = StateDir::new(sides.state.path());
         sides.sync().unwrap();
         let baseline = state.baseline().unwrap();
         let journal = Journal {
@@ -872,7 +872,7 @@ mod tests {
         let sides = Sides::new();
         sides.sender.write("a.txt", "one");
         sides.sync().unwrap();
-        let state = State::new(sides.state.path());
+        let state = StateDir::new(sides.state.path());
         let base = state.baseline().unwrap();
         let journal = Journal {
             token: "t".into(),

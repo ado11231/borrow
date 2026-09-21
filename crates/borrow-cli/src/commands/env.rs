@@ -59,7 +59,9 @@ pub async fn add(
 pub async fn list(agent: Option<String>) -> anyhow::Result<i32> {
     let config = Config::load()?;
     let (remote, local, id) = resolve(&config, agent)?;
-    let Response::Names(names) = request(remote, Request::EnvList { project: id }).await? else {
+    let Response::EnvironmentFiles(names) =
+        request(remote, Request::EnvList { project: id }).await?
+    else {
         return Err(unexpected());
     };
     let style = Style::stdout();

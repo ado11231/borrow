@@ -61,8 +61,8 @@ pub struct Specs {
     pub kernel: String,
     pub cpu: String,
     pub cores: usize,
-    pub memory_mb: u64,
-    pub disk_total_mb: u64,
+    pub memory_mib: u64,
+    pub disk_total_mib: u64,
     /// Tooling that was found on the box, such as docker or tmux.
     pub tools: Vec<String>,
     /// Last, because toml cannot put a plain value after a list of tables.
@@ -73,20 +73,20 @@ pub struct Specs {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Gpu {
     pub name: String,
-    pub vram_mb: Option<u64>,
+    pub vram_mib: Option<u64>,
 }
 
 /// Current resource usage and available capacity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Health {
     pub cpu_percent: f32,
-    pub memory_used_mb: u64,
-    pub memory_total_mb: u64,
-    pub swap_total_mb: u64,
-    pub disk_free_mb: u64,
+    pub memory_used_mib: u64,
+    pub memory_total_mib: u64,
+    pub swap_total_mib: u64,
+    pub disk_free_mib: u64,
     /// Free space where Borrow keeps project copies and build output.
     #[serde(default)]
-    pub workspace_free_mb: Option<u64>,
+    pub workspace_free_mib: Option<u64>,
     pub gpus: Vec<GpuHealth>,
     /// Why GPU numbers are missing when nvidia-smi is installed but failing.
     #[serde(default)]
@@ -98,8 +98,8 @@ pub struct Health {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpuHealth {
     pub name: String,
-    pub vram_free_mb: Option<u64>,
-    pub vram_total_mb: Option<u64>,
+    pub vram_free_mib: Option<u64>,
+    pub vram_total_mib: Option<u64>,
     pub utilization_percent: Option<u32>,
     pub temperature_c: Option<u32>,
 }

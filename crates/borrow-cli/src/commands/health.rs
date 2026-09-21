@@ -39,13 +39,13 @@ pub fn render(name: &str, health: &Health, style: Style) -> String {
     output.push_str(&row("CPU", load(health.cpu_percent as f64, style)));
     output.push_str(&row(
         "RAM",
-        memory(health.memory_used_mb, health.memory_total_mb, style),
+        memory(health.memory_used_mib, health.memory_total_mib, style),
     ));
     output.push_str(&row(
         "Disk",
-        format!("{} free", capacity(health.disk_free_mb)),
+        format!("{} free", capacity(health.disk_free_mib)),
     ));
-    if let Some(free) = health.workspace_free_mb {
+    if let Some(free) = health.workspace_free_mib {
         output.push_str(&row("Workspace", workspace(free, style)));
     }
 
@@ -65,7 +65,7 @@ pub fn render(name: &str, health: &Health, style: Style) -> String {
             .map(|value| load(value as f64, style))
             .unwrap_or_else(|| "Unavailable".to_string());
         output.push_str(&row("Usage", usage));
-        let vram = match (gpu.vram_free_mb, gpu.vram_total_mb) {
+        let vram = match (gpu.vram_free_mib, gpu.vram_total_mib) {
             (Some(free), Some(total)) if free <= total => memory(total - free, total, style),
             _ => "Unavailable".to_string(),
         };
@@ -79,7 +79,7 @@ pub fn render(name: &str, health: &Health, style: Style) -> String {
             .unwrap_or_else(|| "Unavailable".to_string());
         output.push_str(&row("Temperature", temperature));
     }
-    if health.swap_total_mb == 0 {
+    if health.swap_total_mib == 0 {
         output.push('\n');
         output.push_str(&style.status(
             "No swap configured. Jobs may stop if RAM runs out.",
@@ -91,13 +91,13 @@ pub fn render(name: &str, health: &Health, style: Style) -> String {
     output
 }
 
-fn workspace(free_mb: u64, style: Style) -> String {
-    match free_mb < borrow_core::telemetry::DISK_WARNING_MB {
+fn workspace(free_mib: u64, style: Style) -> String {
+    match free_mib < borrow_core::telemetry::DISK_WARNING_MIB {
         true => style.paint(
-            format!("{} free  Low space", capacity(free_mb)),
+            format!("{} free  Low space", capacity(free_mib)),
             Tone::Error,
         ),
-        false => format!("{} free", capacity(free_mb)),
+        false => format!("{} free", capacity(free_mib)),
     }
 }
 
@@ -149,15 +149,15 @@ mod tests {
     fn sample() -> Health {
         Health {
             cpu_percent: 42.0,
-            memory_used_mb: 18432,
-            memory_total_mb: 65536,
-            swap_total_mb: 4096,
-            disk_free_mb: 419840,
-            workspace_free_mb: Some(1024),
+            memory_used_mib: 18432,
+            memory_total_mib: 65536,
+            swap_total_mib: 4096,
+            disk_free_mib: 419840,
+            workspace_free_mib: Some(1024),
             gpus: vec![GpuHealth {
                 name: "Example GPU".to_string(),
-                vram_free_mb: Some(14336),
-                vram_total_mb: Some(24576),
+                vram_free_mib: Some(14336),
+                vram_total_mib: Some(24576),
                 utilization_percent: Some(71),
                 temperature_c: Some(76),
             }],
@@ -217,8 +217,8 @@ mod tests {
         let mut health = sample();
         health.gpus.push(GpuHealth {
             name: "Second GPU".to_string(),
-            vram_free_mb: None,
-            vram_total_mb: None,
+            vram_free_mib: None,
+            vram_total_mib: None,
             utilization_percent: None,
             temperature_c: None,
         });
@@ -226,7 +226,7 @@ mod tests {
         assert!(output.contains("GPU 1"));
         assert!(output.contains("GPU 2"));
         assert_eq!(output.matches("Unavailable").count(), 3);
-        health.gpus[0].vram_free_mb = Some(999999);
+        health.gpus[0].vram_free_mib = Some(999999);
         assert!(render("archbox", &health, Style::new(false)).contains("VRAM         Unavailable"));
         health.gpus.clear();
         assert!(render("archbox", &health, Style::new(false)).contains("No GPU data available"));
@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn swap_notice_is_a_readable_warning() {
         let mut health = sample();
-        health.swap_total_mb = 0;
+        health.swap_total_mib = 0;
         assert!(
             render("archbox", &health, Style::new(false)).contains("Warning: No swap configured.")
         );

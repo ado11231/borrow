@@ -6,7 +6,7 @@ use anyhow::{Context, bail, ensure};
 use borrow_core::artifacts::{self, Layout};
 use borrow_core::control::{JobKind, MAX_ENVIRONMENT_FILE, ProjectInfo, ProjectRef, Snapshot};
 use borrow_core::source::{self, Manifest, Rules};
-use borrow_core::sync::{self, State};
+use borrow_core::sync::{self, StateDir};
 use borrow_core::{stack, storage};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
@@ -22,7 +22,7 @@ pub struct Paths {
 
 impl Paths {
     pub fn new(root: &Path, id: &str) -> anyhow::Result<Paths> {
-        storage::valid_id(id)?;
+        storage::check_id(id)?;
         let dir = root.join("projects").join(id);
         Ok(Paths {
             source: dir.join("source"),
@@ -53,8 +53,8 @@ impl Paths {
         self.environment.join("names.json")
     }
 
-    pub fn sync_state(&self) -> State {
-        State::new(&self.state)
+    pub fn sync_state(&self) -> StateDir {
+        StateDir::new(&self.state)
     }
 }
 
@@ -314,7 +314,7 @@ pub fn prepare_artifacts(paths: &Paths) -> anyhow::Result<Vec<(String, String)>>
     };
     let rules = artifacts::rules(&project, &layout);
     storage::private_dir(&paths.artifacts)?;
-    for (key, value) in artifacts::env(&rules) {
+    for (key, value) in artifacts::variables(&rules) {
         fs::create_dir_all(&value).with_context(|| format!("Could not prepare {key}"))?;
     }
     for (name, target) in artifacts::redirects(&rules) {
@@ -328,7 +328,7 @@ pub fn prepare_artifacts(paths: &Paths) -> anyhow::Result<Vec<(String, String)>>
             Ok(_) => {}
         }
     }
-    Ok(artifacts::env(&rules))
+    Ok(artifacts::variables(&rules))
 }
 
 /// Environment targets must be environment filenames in ordinary project folders.

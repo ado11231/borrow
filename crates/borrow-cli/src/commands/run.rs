@@ -148,7 +148,7 @@ mod tests {
     fn inside_a_project_it_names_the_folder_and_what_moved() {
         assert_eq!(
             announcement("archbox", Some(&local("crates/cli", vec![Stack::Rust]))),
-            "▶ Running on archbox · app/crates/cli · target → local disk"
+            "▶ Running on archbox · app/crates/cli · target → Agent disk"
         );
     }
 

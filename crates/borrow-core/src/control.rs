@@ -99,7 +99,7 @@ pub enum Response {
     Session(SessionInfo),
     Jobs(Vec<Job>),
     Job(Job),
-    Names(Vec<String>),
+    EnvironmentFiles(Vec<String>),
     Unlinked { environment_files: usize },
 }
 

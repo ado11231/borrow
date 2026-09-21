@@ -42,7 +42,7 @@ pub async fn sync(
     result.map(|_| 0)
 }
 
-fn report(outcome: transfer::Outcome, agent: &str, name: &str, direction: Direction) {
+fn report(outcome: transfer::SyncResult, agent: &str, name: &str, direction: Direction) {
     match (direction, outcome.changed) {
         (Direction::Push, 0) => {
             presentation::success(format!("{agent} already has the latest source of {name}"))
@@ -53,7 +53,7 @@ fn report(outcome: transfer::Outcome, agent: &str, name: &str, direction: Direct
         (Direction::Push, _) => {}
         (Direction::Pull, changed) => presentation::success(format!(
             "Retrieved {} from {agent}",
-            transfer::count(changed, "change")
+            presentation::plural(changed, "change")
         )),
     }
     if outcome.kept > 0 {
@@ -63,7 +63,7 @@ fn report(outcome: transfer::Outcome, agent: &str, name: &str, direction: Direct
         };
         presentation::progress(format!(
             "Kept {} changed only on {place}. Review with {hint}",
-            transfer::count(outcome.kept, "path")
+            presentation::plural(outcome.kept, "path")
         ));
     }
 }

@@ -43,8 +43,8 @@ fn render(name: &str, host: &str, specs: &Specs, style: Style) -> String {
         "CPU",
         format!("{} ({} cores)", specs.cpu, specs.cores),
     ));
-    output.push_str(&row("RAM", capacity(specs.memory_mb)));
-    output.push_str(&row("Disk", capacity(specs.disk_total_mb)));
+    output.push_str(&row("RAM", capacity(specs.memory_mib)));
+    output.push_str(&row("Disk", capacity(specs.disk_total_mib)));
     if specs.gpus.is_empty() {
         output.push_str(&row("GPU", "No GPU data available"));
     }
@@ -53,7 +53,7 @@ fn render(name: &str, host: &str, specs: &Specs, style: Style) -> String {
         output.push_str(&row(&format!("GPU {}", index + 1), &gpu.name));
         output.push_str(&row(
             "VRAM",
-            gpu.vram_mb
+            gpu.vram_mib
                 .map(capacity)
                 .unwrap_or_else(|| "Unavailable".to_string()),
         ));
@@ -84,12 +84,12 @@ mod tests {
             kernel: "Example".into(),
             cpu: "Example CPU".into(),
             cores: 8,
-            memory_mb: 1536,
-            disk_total_mb: 10240,
+            memory_mib: 1536,
+            disk_total_mib: 10240,
             tools: vec!["tmux".into()],
             gpus: vec![Gpu {
                 name: "Example GPU".into(),
-                vram_mb: Some(512),
+                vram_mib: Some(512),
             }],
         };
         let text = render("archbox", "archbox.local", &specs, Style::new(false));
@@ -98,7 +98,7 @@ mod tests {
         assert!(text.contains("512.0 MiB"));
         assert!(text.contains("Tools        tmux"));
         assert!(!text.contains('\x1b'));
-        specs.gpus[0].vram_mb = None;
+        specs.gpus[0].vram_mib = None;
         assert!(render("archbox", "host", &specs, Style::new(false)).contains("Unavailable"));
         specs.gpus.clear();
         specs.tools.clear();
