@@ -1,10 +1,9 @@
 //! How borrow labels the key it installs, and how a machine publishes its identity.
 
-use crate::config;
+use crate::{config, storage};
 use anyhow::Context;
 use std::fs;
-use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The comment written into borrow's public key, and the marker `unlink` looks for
 /// when taking that key back off a box. Both sides have to agree on it, which is
@@ -84,7 +83,7 @@ pub fn forget_host(host: &str, port: Option<u16>) -> anyhow::Result<()> {
 }
 
 /// Every line of the file except the ones for this box.
-fn without_host(file: &PathBuf, pattern: &str) -> anyhow::Result<Vec<String>> {
+fn without_host(file: &Path, pattern: &str) -> anyhow::Result<Vec<String>> {
     let existing = fs::read_to_string(file).unwrap_or_default();
 
     Ok(existing
@@ -95,7 +94,9 @@ fn without_host(file: &PathBuf, pattern: &str) -> anyhow::Result<Vec<String>> {
         .collect())
 }
 
-fn write_lines(file: &PathBuf, lines: &[String]) -> anyhow::Result<()> {
+/// Replace an SSH line file in one step. Truncating in place would leave the file empty
+/// if the write failed partway, which for `authorized_keys` locks the owner out of the box.
+fn write_lines(file: &Path, lines: &[String]) -> anyhow::Result<()> {
     if let Some(parent) = file.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("Could not create {}", parent.display()))?;
@@ -104,7 +105,7 @@ fn write_lines(file: &PathBuf, lines: &[String]) -> anyhow::Result<()> {
     let mut body = lines.join("\n");
     body.push('\n');
 
-    fs::write(file, body).with_context(|| format!("Could not write {}", file.display()))
+    storage::write_bytes(file, body.as_bytes())
 }
 
 /// Authorize a public key using the same marker that unlink uses to revoke it.
@@ -121,20 +122,14 @@ pub fn authorize(peer: &str, public_key: &str) -> anyhow::Result<PathBuf> {
     let file = dir.join("authorized_keys");
     let existing = fs::read_to_string(&file).unwrap_or_default();
 
-    let mut lines: Vec<&str> = existing
+    let mut lines: Vec<String> = existing
         .lines()
         .filter(|line| !line.trim().is_empty() && !line.ends_with(&tag))
+        .map(|line| line.to_string())
         .collect();
 
-    lines.push(&key);
-
-    let mut body = lines.join("\n");
-    body.push('\n');
-
-    let mut handle =
-        fs::File::create(&file).with_context(|| format!("Could not write {}", file.display()))?;
-    handle.write_all(body.as_bytes())?;
-    set_mode(&file, 0o600)?;
+    lines.push(key);
+    write_lines(&file, &lines)?;
 
     Ok(file)
 }
@@ -177,16 +172,13 @@ pub fn deauthorize(peer: &str) -> anyhow::Result<()> {
     let tag = marker(peer);
     let existing = fs::read_to_string(&file)?;
 
-    let kept: Vec<&str> = existing
+    let kept: Vec<String> = existing
         .lines()
         .filter(|line| !line.trim().is_empty() && !line.ends_with(&tag))
+        .map(|line| line.to_string())
         .collect();
 
-    let mut body = kept.join("\n");
-    body.push('\n');
-
-    fs::write(&file, body).with_context(|| format!("Could not write {}", file.display()))?;
-    set_mode(&file, 0o600)
+    write_lines(&file, &kept)
 }
 
 pub fn ssh_dir() -> anyhow::Result<PathBuf> {
@@ -242,5 +234,51 @@ mod tests {
     #[test]
     fn something_that_is_not_a_key_is_refused() {
         assert!(authorized_line("archbox", "hello there").is_err());
+    }
+
+    /// An SSH line file is replaced by a rename, so a failed write can never leave the
+    /// caller with an empty authorized_keys and no way back into the machine.
+    #[test]
+    fn a_line_file_is_replaced_in_one_step_and_stays_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = crate::storage::testing::TempDir::new("keys");
+        let file = dir.path().join("authorized_keys");
+
+        write_lines(&file, &["ssh-ed25519 AAAA borrow:laptop".to_string()]).unwrap();
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "ssh-ed25519 AAAA borrow:laptop\n"
+        );
+        assert_eq!(
+            fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        write_lines(&file, &[]).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "\n");
+        assert!(
+            fs::read_dir(dir.path()).unwrap().flatten().all(|e| !e
+                .file_name()
+                .to_string_lossy()
+                .starts_with(crate::storage::PARTIAL_PREFIX)),
+            "a temporary file was left behind"
+        );
+    }
+
+    /// `link` learns host keys and `unlink` forgets them. Both derive the known_hosts
+    /// pattern from a port, so a mismatch leaves an entry nothing can ever remove.
+    #[test]
+    fn a_host_is_only_forgotten_under_the_port_it_was_learned_with() {
+        let dir = crate::storage::testing::TempDir::new("hosts");
+        let file = dir.path().join("known_hosts");
+        let learned = host_pattern("archbox", Some(2222));
+        write_lines(&file, &[format!("{learned} ssh-ed25519 AAAA")]).unwrap();
+
+        let wrong_port = without_host(&file, &host_pattern("archbox", None)).unwrap();
+        assert_eq!(wrong_port.len(), 1, "the entry should have survived");
+
+        let right_port = without_host(&file, &learned).unwrap();
+        assert!(right_port.is_empty(), "the entry should have been removed");
     }
 }

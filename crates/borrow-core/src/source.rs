@@ -51,9 +51,6 @@ const GENERATED: &[&str] = &[
     ".cache",
 ];
 
-/// Prefix of Borrow's own temporary files, which must never be mistaken for source.
-pub const PARTIAL_PREFIX: &str = ".borrow-partial-";
-
 /// `.env`, `.env.local`, `.env.example`, `prod.env`, and `.envrc`, including templates.
 pub fn is_environment_name(name: &str) -> bool {
     name == ".env" || name.starts_with(".env.") || name.ends_with(".env") || name == ".envrc"
@@ -64,7 +61,9 @@ pub fn is_environment_name(name: &str) -> bool {
 pub fn mandatory(path: &str, has_file: impl Fn(&str) -> bool) -> bool {
     let parts: Vec<&str> = path.split('/').collect();
     parts.iter().enumerate().any(|(index, name)| {
-        if is_environment_name(name) || GENERATED.contains(name) || name.starts_with(PARTIAL_PREFIX)
+        if is_environment_name(name)
+            || GENERATED.contains(name)
+            || name.starts_with(storage::PARTIAL_PREFIX)
         {
             return true;
         }

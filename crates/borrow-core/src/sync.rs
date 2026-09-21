@@ -4,8 +4,8 @@
 //! being updated. Both are compared with the last shared baseline, so edits made only
 //! on the receiver are kept and paths changed differently on both sides stop the sync.
 
-use crate::source::{self, Entry, Manifest, PARTIAL_PREFIX};
-use crate::storage;
+use crate::source::{self, Entry, Manifest};
+use crate::storage::{self, PARTIAL_PREFIX};
 use anyhow::{Context, bail, ensure};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -445,7 +445,10 @@ fn undo_step(root: &Path, journal: &Journal, step: &Step) -> anyhow::Result<()> 
                 Some(target) => std::os::unix::fs::symlink(target, &temp)?,
                 None => {
                     copy_file(&saved, &temp)?;
-                    let old = fs::metadata(&dest).ok().map(|m| m.permissions().mode());
+                    let old = fs::symlink_metadata(&dest)
+                        .ok()
+                        .filter(|m| m.is_file())
+                        .map(|m| m.permissions().mode());
                     fs::set_permissions(
                         &temp,
                         fs::Permissions::from_mode(mode(old, before.executable)),
@@ -496,6 +499,50 @@ mod tests {
             .iter()
             .map(|(name, hash)| (name.to_string(), file(hash)))
             .collect()
+    }
+
+    /// An interrupted step can leave a symlink where a regular file used to be. Reading
+    /// the destination's permissions must not follow that link, or the restored file
+    /// inherits the mode of whatever the link pointed at, possibly outside the project.
+    #[test]
+    fn undoing_a_symlink_does_not_take_its_targets_permissions() {
+        let root = TempDir::new("undo");
+        let backup = TempDir::new("undo-backup");
+        let outside = TempDir::new("undo-outside");
+
+        let target = outside.write("wide-open", "elsewhere");
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o666)).unwrap();
+        backup.write("a.txt", "original");
+        std::os::unix::fs::symlink(&target, root.path().join("a.txt")).unwrap();
+
+        let before = source::entry(backup.path(), "a.txt").unwrap();
+        let after = source::entry(root.path(), "a.txt").unwrap();
+        assert!(after.as_ref().is_some_and(|e| e.link.is_some()));
+
+        let journal = Journal {
+            token: "t".into(),
+            backup: backup.path().to_path_buf(),
+            steps: Vec::new(),
+            baseline: Manifest::new(),
+        };
+        let step = Step {
+            name: "a.txt".into(),
+            before,
+            after,
+        };
+
+        undo_step(root.path(), &journal, &step).unwrap();
+
+        let restored = root.path().join("a.txt");
+        assert_eq!(fs::read_to_string(&restored).unwrap(), "original");
+        assert_eq!(
+            fs::symlink_metadata(&restored)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o644
+        );
     }
 
     #[test]

@@ -9,6 +9,10 @@ use borrow_core::protocol::{Request, Response};
 
 /// Take a pairing code, install this machine's key on the box, and save what it
 /// takes to reach it again. Every step says what it did.
+///
+/// One `ssh_port` feeds both the learned host keys and the saved Agent, because `unlink`
+/// forgets those keys by the saved port. Learning them under a different one would leave
+/// an entry nothing could ever remove.
 pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
     let (host, port, token) = parse_code(&code)?;
     let client_name = this_machine();
@@ -54,14 +58,15 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
     };
 
     let name = name.unwrap_or(paired.name.clone());
-    let known_hosts = core_keys::learn_host(&host, None, &paired.host_keys)?;
+    let ssh_port = None;
+    let known_hosts = core_keys::learn_host(&host, ssh_port, &paired.host_keys)?;
 
     let mut config = Config::load_or_empty()?;
     config.upsert(Agent {
         name: name.clone(),
         host: host.clone(),
         user: paired.user.clone(),
-        port: None,
+        port: ssh_port,
         daemon_port: Some(port),
         identity_file: Some(private_key.clone()),
         known_hosts: Some(known_hosts.clone()),

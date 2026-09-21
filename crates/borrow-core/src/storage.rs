@@ -29,6 +29,10 @@ pub fn private_dir(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Names the temporary file an atomic write renames into place. Source scanning skips
+/// anything starting with it, so a write in flight is never picked up as project content.
+pub const PARTIAL_PREFIX: &str = ".borrow-partial-";
+
 /// A random 128 bit identifier written as 32 lowercase hex characters.
 pub fn new_id() -> String {
     format!("{:032x}", rand::random::<u128>())
@@ -123,7 +127,7 @@ pub fn write_json<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
 /// Replace a file atomically with owner only permissions. The parent must already exist.
 pub fn write_bytes(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     let parent = path.parent().context("Missing parent directory")?;
-    let temp = parent.join(format!(".borrow-partial-{}", new_id()));
+    let temp = parent.join(format!("{PARTIAL_PREFIX}{}", new_id()));
     let result = (|| -> std::io::Result<()> {
         let mut file = OpenOptions::new()
             .write(true)
