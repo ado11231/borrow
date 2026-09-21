@@ -92,9 +92,9 @@ pub fn is_listening(addr: SocketAddr) -> bool {
     TcpStream::connect_timeout(&addr, PROBE_TIMEOUT).is_ok()
 }
 
-/// Whether an ssh server is accepting connections on this machine. Phase 2 mounts
-/// the Client's files onto the Agent, so both machines end up needing one.
-pub fn ssh_server_check() -> Check {
+/// Whether an ssh server is accepting connections on this machine. The Agent needs one,
+/// because ssh carries every command, transfer, and control message. The Client does not.
+fn ssh_server_check() -> Check {
     let addr: SocketAddr = ([127, 0, 0, 1], 22).into();
 
     if is_listening(addr) {
@@ -122,27 +122,6 @@ pub fn tool_check(program: &str, state_when_missing: State) -> Check {
     match state_when_missing {
         State::Warn => Check::warn(label, fix),
         _ => Check::fail(label, fix),
-    }
-}
-
-/// Check write access before mount setup and explain how to fix permissions.
-pub fn writable_check(path: &str, purpose: &str) -> Check {
-    let dir = std::path::Path::new(path);
-
-    let fix = format!("sudo mkdir -p {path} && sudo chown $(id -un) {path}");
-
-    if !dir.exists() {
-        return Check::fail(format!("{path} does not exist ({purpose})"), fix);
-    }
-
-    let probe = dir.join(".borrow-write-test");
-
-    match std::fs::write(&probe, b"") {
-        Ok(()) => {
-            let _ = std::fs::remove_file(&probe);
-            Check::pass(format!("{path} is writable"))
-        }
-        Err(_) => Check::fail(format!("{path} is not writable ({purpose})"), fix),
     }
 }
 

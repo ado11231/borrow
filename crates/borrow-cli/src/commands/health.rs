@@ -4,7 +4,7 @@ use crate::client::{self, Control, unexpected};
 use crate::live;
 use borrow_core::config::Config;
 use borrow_core::control::{Request, Response};
-use borrow_core::presentation::{Style, Tone, capacity};
+use borrow_core::presentation::{Style, Tone, capacity, row};
 use borrow_core::protocol::Health;
 
 pub async fn health(agent: Option<String>, watch: bool) -> anyhow::Result<i32> {
@@ -36,36 +36,40 @@ pub async fn fetch(control: &mut Control) -> anyhow::Result<Health> {
 
 pub fn render(name: &str, health: &Health, style: Style) -> String {
     let mut output = format!("\n{}\n\n", style.heading(format!("Agent: {name}")));
-    output.push_str(&style.row("CPU", load(health.cpu_percent as f64, style)));
-    output.push_str(&style.row(
+    output.push_str(&row("CPU", load(health.cpu_percent as f64, style)));
+    output.push_str(&row(
         "RAM",
         memory(health.memory_used_mb, health.memory_total_mb, style),
     ));
-    output.push_str(&style.row("Disk", format!("{} free", capacity(health.disk_free_mb))));
+    output.push_str(&row(
+        "Disk",
+        format!("{} free", capacity(health.disk_free_mb)),
+    ));
     if let Some(free) = health.workspace_free_mb {
-        output.push_str(&style.row("Workspace", workspace(free, style)));
+        output.push_str(&row("Workspace", workspace(free, style)));
     }
 
     match (&health.gpu_problem, health.gpus.is_empty()) {
-        (Some(problem), _) => {
-            output.push_str(&style.row("GPU", style.paint(problem, Tone::Warning)))
-        }
-        (None, true) => output.push_str(&style.row("GPU", "No GPU data available")),
+        (Some(problem), _) => output.push_str(&row("GPU", style.paint(problem, Tone::Warning))),
+        (None, true) => output.push_str(&row("GPU", "No GPU data available")),
         (None, false) => {}
     }
     for (index, gpu) in health.gpus.iter().enumerate() {
         output.push('\n');
-        output.push_str(&style.row(&format!("GPU {}", index + 1), style.heading(&gpu.name)));
+        output.push_str(&row(
+            &format!("GPU {}", index + 1),
+            style.heading(&gpu.name),
+        ));
         let usage = gpu
             .utilization_percent
             .map(|value| load(value as f64, style))
             .unwrap_or_else(|| "Unavailable".to_string());
-        output.push_str(&style.row("Usage", usage));
+        output.push_str(&row("Usage", usage));
         let vram = match (gpu.vram_free_mb, gpu.vram_total_mb) {
             (Some(free), Some(total)) if free <= total => memory(total - free, total, style),
             _ => "Unavailable".to_string(),
         };
-        output.push_str(&style.row("VRAM", vram));
+        output.push_str(&row("VRAM", vram));
         let temperature = gpu
             .temperature_c
             .map(|value| {
@@ -73,7 +77,7 @@ pub fn render(name: &str, health: &Health, style: Style) -> String {
                 style.paint(format!("{value}°C  {label}"), tone)
             })
             .unwrap_or_else(|| "Unavailable".to_string());
-        output.push_str(&style.row("Temperature", temperature));
+        output.push_str(&row("Temperature", temperature));
     }
     if health.swap_total_mb == 0 {
         output.push('\n');

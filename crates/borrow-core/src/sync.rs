@@ -15,7 +15,7 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 /// Source backup sets kept per project. Older sets are removed after a successful sync.
-pub const BACKUPS_KEPT: usize = 20;
+const BACKUPS_KEPT: usize = 20;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Plan {
@@ -127,12 +127,8 @@ struct Step {
     after: Option<Entry>,
 }
 
-pub struct Applied {
-    pub changed: usize,
-    pub backup: Option<PathBuf>,
-}
-
-/// Apply a plan to `root` using regular files staged under `stage`.
+/// Apply a plan to `root` using regular files staged under `stage`, and report how many
+/// paths changed.
 ///
 /// Every destination is compared with what the plan expected, and every staged file is
 /// hashed, before anything is touched. A journal and backups are written first, and the
@@ -145,7 +141,7 @@ pub fn apply(
     receiver: &Manifest,
     sender: &Manifest,
     token: &str,
-) -> anyhow::Result<Applied> {
+) -> anyhow::Result<usize> {
     ensure!(
         plan.conflicts.is_empty(),
         "Resolve source conflicts before syncing"
@@ -157,10 +153,7 @@ pub fn apply(
     storage::private_dir(&state.dir)?;
     if plan.changes.is_empty() {
         storage::write_json(&state.baseline_file(), &plan.baseline)?;
-        return Ok(Applied {
-            changed: 0,
-            backup: None,
-        });
+        return Ok(0);
     }
 
     let deleted: BTreeSet<&str> = plan
@@ -244,10 +237,7 @@ pub fn apply(
     }
     fs::remove_file(state.journal_file())?;
     prune_backups(state);
-    Ok(Applied {
-        changed: plan.changes.len(),
-        backup: replaces.then_some(backup),
-    })
+    Ok(plan.changes.len())
 }
 
 /// Every existing parent must be a real directory, unless it is a file this plan deletes.

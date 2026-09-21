@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
 /// Completed records kept for `borrow ps --all`.
-pub const HISTORY: usize = 100;
+const HISTORY: usize = 100;
 
 /// How long stopped work gets to exit on its own before it is killed.
 pub const GRACE: Duration = Duration::from_secs(5);
@@ -37,7 +37,7 @@ fn lock(root: &Path) -> anyhow::Result<fs::File> {
     storage::lock(&dir(root).join("records.lock"))
 }
 
-pub fn boot_time() -> u64 {
+fn boot_time() -> u64 {
     System::boot_time()
 }
 
@@ -159,7 +159,7 @@ fn reconcile(root: &Path, job: &Job) -> Option<JobState> {
 }
 
 /// Find an active job by its full ID or a unique prefix of at least four characters.
-pub fn find_active(root: &Path, query: &str) -> anyhow::Result<Job> {
+fn find_active(root: &Path, query: &str) -> anyhow::Result<Job> {
     ensure!(
         query.len() >= 4 && query.bytes().all(|b| b.is_ascii_hexdigit()),
         "Pass the job ID shown by borrow ps"
@@ -176,7 +176,7 @@ pub fn find_active(root: &Path, query: &str) -> anyhow::Result<Job> {
     }
 }
 
-pub fn tmux_socket(root: &Path) -> PathBuf {
+fn tmux_socket(root: &Path) -> PathBuf {
     root.join("tmux").join("server")
 }
 
@@ -191,7 +191,7 @@ fn tmux_program() -> Option<String> {
 }
 
 /// tmux on Borrow's own private socket, so personal tmux sessions are never touched.
-pub fn tmux(root: &Path) -> Command {
+fn tmux(root: &Path) -> Command {
     let mut command = Command::new("tmux");
     command.arg("-S").arg(tmux_socket(root));
     command

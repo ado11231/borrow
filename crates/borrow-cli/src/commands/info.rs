@@ -3,7 +3,7 @@
 use crate::client::{self, unexpected};
 use borrow_core::config::Config;
 use borrow_core::control::{Request, Response};
-use borrow_core::presentation::{Style, capacity};
+use borrow_core::presentation::{Style, capacity, row};
 use borrow_core::protocol::Specs;
 
 /// Use cached specifications unless a refresh is requested.
@@ -37,28 +37,29 @@ pub async fn info(agent: Option<String>, refresh: bool) -> anyhow::Result<i32> {
 
 fn render(name: &str, host: &str, specs: &Specs, style: Style) -> String {
     let mut output = format!("\n{}\n\n", style.heading(format!("Agent: {name} ({host})")));
-    output.push_str(&style.row("OS", &specs.os));
-    output.push_str(&style.row("Kernel", &specs.kernel));
-    output.push_str(&style.row("CPU", format!("{} ({} cores)", specs.cpu, specs.cores)));
-    output.push_str(&style.row("RAM", capacity(specs.memory_mb)));
-    output.push_str(&style.row("Disk", capacity(specs.disk_total_mb)));
+    output.push_str(&row("OS", &specs.os));
+    output.push_str(&row("Kernel", &specs.kernel));
+    output.push_str(&row(
+        "CPU",
+        format!("{} ({} cores)", specs.cpu, specs.cores),
+    ));
+    output.push_str(&row("RAM", capacity(specs.memory_mb)));
+    output.push_str(&row("Disk", capacity(specs.disk_total_mb)));
     if specs.gpus.is_empty() {
-        output.push_str(&style.row("GPU", "No GPU data available"));
+        output.push_str(&row("GPU", "No GPU data available"));
     }
     for (index, gpu) in specs.gpus.iter().enumerate() {
         output.push('\n');
-        output.push_str(&style.row(&format!("GPU {}", index + 1), &gpu.name));
-        output.push_str(
-            &style.row(
-                "VRAM",
-                gpu.vram_mb
-                    .map(capacity)
-                    .unwrap_or_else(|| "Unavailable".to_string()),
-            ),
-        );
+        output.push_str(&row(&format!("GPU {}", index + 1), &gpu.name));
+        output.push_str(&row(
+            "VRAM",
+            gpu.vram_mb
+                .map(capacity)
+                .unwrap_or_else(|| "Unavailable".to_string()),
+        ));
     }
     output.push('\n');
-    output.push_str(&style.row(
+    output.push_str(&row(
         "Tools",
         if specs.tools.is_empty() {
             "None detected".to_string()

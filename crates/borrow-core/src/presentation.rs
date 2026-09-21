@@ -75,10 +75,6 @@ impl Style {
         self.paint(text, Tone::Info)
     }
 
-    pub fn row(self, label: &str, value: impl std::fmt::Display) -> String {
-        format!("  {:<12} {value}\n", label)
-    }
-
     pub fn status(self, text: impl std::fmt::Display, tone: Tone) -> String {
         let label = match tone {
             Tone::Good => "✓",
@@ -90,6 +86,13 @@ impl Style {
     }
 }
 
+/// One indented `label   value` line. Colourless on purpose: the label is structure, and
+/// any emphasis belongs to the value the caller passes in.
+pub fn row(label: &str, value: impl std::fmt::Display) -> String {
+    format!("  {label:<12} {value}\n")
+}
+
+/// Whether the NO_COLOR convention is in effect.
 pub fn no_color() -> bool {
     std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty())
 }
@@ -111,7 +114,7 @@ pub fn progress(text: impl std::fmt::Display) {
 }
 
 pub fn detail(label: &str, value: impl std::fmt::Display) {
-    eprint!("{}", Style::stderr().row(label, value));
+    eprint!("{}", row(label, value));
 }
 
 /// Protocol memory fields contain MiB despite their historical mb names.

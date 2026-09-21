@@ -298,7 +298,7 @@ pub fn finish(root: &Path, lease: Lease, token: &str, manifest: Manifest) -> any
         };
     }
     source::check_links(&result, &rules)?;
-    let applied = sync::apply(
+    sync::apply(
         &paths.source,
         &lease.stage,
         &state,
@@ -306,8 +306,7 @@ pub fn finish(root: &Path, lease: Lease, token: &str, manifest: Manifest) -> any
         &lease.before,
         &manifest,
         token,
-    )?;
-    Ok(applied.changed)
+    )
 }
 
 /// Prepare build output folders and return the environment for work in this project.

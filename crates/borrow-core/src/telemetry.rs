@@ -50,7 +50,7 @@ pub fn specs(name: &str) -> Specs {
 }
 
 /// RAM use at or above this percentage produces a warning before new work starts.
-pub const MEMORY_WARNING_PERCENT: u64 = 90;
+const MEMORY_WARNING_PERCENT: u64 = 90;
 
 /// Less free workspace space than this produces a warning before new work starts.
 pub const DISK_WARNING_MB: u64 = 2 * 1024;
@@ -182,7 +182,7 @@ fn nvidia_smi(fields: &str) -> Result<Vec<Vec<String>>, String> {
 
 /// A readable reason from a failed nvidia-smi. A version mismatch means a driver update
 /// is waiting for a reboot, which is common on rolling distributions.
-pub fn gpu_problem(output: &str) -> Option<String> {
+fn gpu_problem(output: &str) -> Option<String> {
     if output.contains("No devices were found") {
         return None;
     }
