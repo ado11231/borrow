@@ -108,19 +108,42 @@ pub async fn preview(
     Ok(plan)
 }
 
+/// Finish any interrupted sync on this machine, then take the Agent's lease. Push and pull
+/// start exactly this way, and both must pair it with `release_on_error`.
+async fn take_lease(
+    opened: &mut ProjectSession,
+    local: &Local,
+    pull: bool,
+) -> anyhow::Result<(Vec<String>, Snapshot, String)> {
+    recover_local(local, &opened.id).await?;
+    let excludes = source::client_excludes(&local.root)?;
+    let snapshot = begin(opened, &excludes, pull).await?;
+    let token = snapshot
+        .token
+        .clone()
+        .context("The Agent did not open a sync")?;
+    Ok((excludes, snapshot, token))
+}
+
+/// Hand the lease back when the transfer failed, so the project is free again straight
+/// away instead of staying busy until the Agent times the connection out.
+async fn release_on_error<T>(
+    opened: &mut ProjectSession,
+    token: String,
+    result: &anyhow::Result<T>,
+) {
+    if result.is_err() {
+        let _ = opened.control.call(Request::Release { token }).await;
+    }
+}
+
 /// Copy Client edits to the Agent. Nothing is printed unless files move.
 pub async fn push(
     opened: &mut ProjectSession,
     agent: &Agent,
     local: &Local,
 ) -> anyhow::Result<SyncResult> {
-    recover_local(local, &opened.id).await?;
-    let excludes = source::client_excludes(&local.root)?;
-    let snapshot = begin(opened, &excludes, false).await?;
-    let token = snapshot
-        .token
-        .clone()
-        .context("The Agent did not open a sync")?;
+    let (excludes, snapshot, token) = take_lease(opened, local, false).await?;
     let result = async {
         let (local_manifest, _) =
             scan_local(local, &opened.id, &excludes, &snapshot.baseline).await?;
@@ -158,9 +181,7 @@ pub async fn push(
         })
     }
     .await;
-    if result.is_err() {
-        let _ = opened.control.call(Request::Release { token }).await;
-    }
+    release_on_error(opened, token, &result).await;
     let outcome = result?;
     if outcome.changed > 0 {
         presentation::success(format!(
@@ -178,16 +199,9 @@ pub async fn pull(
     agent: &Agent,
     local: &Local,
 ) -> anyhow::Result<SyncResult> {
-    recover_local(local, &opened.id).await?;
-    let excludes = source::client_excludes(&local.root)?;
     let state_dir = state_dir(&opened.id)?;
     let state = StateDir::new(&state_dir);
-
-    let snapshot = begin(opened, &excludes, true).await?;
-    let token = snapshot
-        .token
-        .clone()
-        .context("The Agent did not open a sync")?;
+    let (excludes, snapshot, token) = take_lease(opened, local, true).await?;
     let stage = state_dir.join("staging").join(&token);
     let result = async {
         let (local_manifest, rules) =
@@ -195,6 +209,8 @@ pub async fn pull(
         let plan = sync::plan(&snapshot.baseline, &snapshot.manifest, &local_manifest);
         refuse_conflicts(&plan, &agent.name)?;
         for name in &plan.changes {
+            storage::relative(name)
+                .with_context(|| format!("{} sent an unusable path", agent.name))?;
             ensure!(
                 !rules.excluded(name, |f| snapshot.manifest.contains_key(f)),
                 "{} sent an excluded path: {name}",
@@ -250,9 +266,7 @@ pub async fn pull(
     }
     .await;
     let _ = std::fs::remove_dir_all(state_dir.join("staging"));
-    if result.is_err() {
-        let _ = opened.control.call(Request::Release { token }).await;
-    }
+    release_on_error(opened, token, &result).await;
     result
 }
 
@@ -341,7 +355,7 @@ async fn rsync(
         !exe.contains('\''),
         "Borrow's own path contains a quote, which rsync cannot use: {exe}"
     );
-    let list = tempfile(&files.join("\n"))?;
+    let list = FileList::write(&files.join("\n"))?;
     let local_path = format!("{}/", local.display());
     let (from, to) = match direction {
         Direction::Push => (local_path, "borrow:.".to_string()),
@@ -352,7 +366,7 @@ async fn rsync(
         .arg("-e")
         .arg(format!("'{exe}' internal-rsh"))
         .arg(format!("--rsync-path={rsync_path}"))
-        .arg(format!("--files-from={list}"))
+        .arg(format!("--files-from={}", list.0))
         .arg(from)
         .arg(to)
         .env("BORROW_RSH_AGENT", &agent.name)
@@ -366,7 +380,6 @@ async fn rsync(
     let mut errors = Vec::new();
     let mut limited = stderr.take(64 * 1024);
     let (status, _) = tokio::join!(child.wait(), limited.read_to_end(&mut errors));
-    let _ = std::fs::remove_file(&list);
     let status = status?;
     if !status.success() {
         bail!(
@@ -397,14 +410,28 @@ fn escape_remote(path: &str) -> anyhow::Result<String> {
         .collect())
 }
 
-fn tempfile(body: &str) -> anyhow::Result<String> {
-    let dir = project::client_root()?.join("lists");
-    storage::private_dir(&dir)?;
-    let file = dir.join(storage::new_id());
-    storage::write_bytes(&file, format!("{body}\n").as_bytes())?;
-    file.to_str()
-        .map(str::to_string)
-        .context("Borrow storage path is not UTF 8")
+/// The `--files-from` list handed to rsync, removed when it goes out of scope. A `Drop`
+/// rather than a cleanup line, so an early return cannot leave it behind in storage.
+struct FileList(String);
+
+impl FileList {
+    fn write(body: &str) -> anyhow::Result<FileList> {
+        let dir = project::client_root()?.join("lists");
+        storage::private_dir(&dir)?;
+        let file = dir.join(storage::new_id());
+        storage::write_bytes(&file, format!("{body}\n").as_bytes())?;
+        let path = file
+            .to_str()
+            .map(str::to_string)
+            .context("Borrow storage path is not UTF 8")?;
+        Ok(FileList(path))
+    }
+}
+
+impl Drop for FileList {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 async fn with_heartbeat(

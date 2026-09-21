@@ -76,16 +76,18 @@ pub fn redirects(rules: &[Rule]) -> Vec<(&'static str, &Path)> {
         .collect()
 }
 
-/// Describe which generated files should use Agent storage.
-pub fn summary(rules: &[Rule]) -> Option<String> {
-    let names: Vec<&str> = rules
+/// Describe which generated files will use Agent storage. Takes the stacks rather than
+/// the rules, because the answer does not depend on where the storage actually is, and a
+/// caller that only wants this line should not have to invent a `Layout` to get it.
+pub fn summary(stacks: &[Stack]) -> Option<String> {
+    let names: Vec<&str> = stacks
         .iter()
-        .map(|rule| match rule {
-            Rule::Env { key, .. } if *key == "CARGO_TARGET_DIR" => "target",
-            Rule::Env { key, .. } if *key == "PIP_CACHE_DIR" => "pip cache",
-            Rule::Env { key, .. } => key,
-            Rule::Redirect { name, .. } => name,
+        .flat_map(|stack| match stack {
+            Stack::Rust => ["target"].as_slice(),
+            Stack::Node => ["node_modules"].as_slice(),
+            Stack::Python => ["pip cache", ".venv"].as_slice(),
         })
+        .copied()
         .collect();
 
     match names.is_empty() {
@@ -180,15 +182,13 @@ mod tests {
         let rules = rules(&project(Vec::new()), &layout());
 
         assert!(rules.is_empty());
-        assert_eq!(summary(&rules), None);
+        assert_eq!(summary(&[]), None);
     }
 
     #[test]
     fn the_summary_names_what_was_moved() {
-        let rules = rules(&project(vec![Stack::Rust, Stack::Node]), &layout());
-
         assert_eq!(
-            summary(&rules),
+            summary(&[Stack::Rust, Stack::Node]),
             Some("target, node_modules → Agent disk".to_string())
         );
     }

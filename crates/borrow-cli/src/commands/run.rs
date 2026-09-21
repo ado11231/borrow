@@ -4,11 +4,10 @@ use crate::client::{self, Refused};
 use crate::project::{self, Local};
 use crate::ssh::{Disconnected, RemoteCommand};
 use crate::transfer;
-use borrow_core::artifacts::{self, Layout};
+use borrow_core::artifacts;
 use borrow_core::config::{Agent, Config};
 use borrow_core::control::{Request, Response};
 use borrow_core::presentation::{self, Style};
-use borrow_core::stack;
 
 /// Run `cmd` on the Agent and return its exit code. A non zero code is not an
 /// error: borrow did its job, and the command it ran happened to fail.
@@ -113,15 +112,7 @@ pub fn location(local: &Local) -> String {
 }
 
 fn split_summary(local: &Local) -> Option<String> {
-    let project = stack::Project {
-        root: local.root.clone(),
-        stacks: local.stacks.clone(),
-    };
-    let layout = Layout {
-        source: local.root.clone(),
-        artifacts: local.root.join(".borrow-artifacts"),
-    };
-    artifacts::summary(&artifacts::rules(&project, &layout))
+    artifacts::summary(&local.stacks)
 }
 
 #[cfg(test)]
