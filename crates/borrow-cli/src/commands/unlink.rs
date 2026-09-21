@@ -47,26 +47,6 @@ pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
         }
     }
 
-    if target.legacy_mount() {
-        let unmount = RemoteCommand::to(
-            &target,
-            "sh".to_string(),
-            vec!["-c".to_string(), unmount_script()],
-        );
-        match unmount.interactive().await {
-            Ok(0) => {
-                presentation::success(format!("Released older project mounts on {}", target.name))
-            }
-            _ => {
-                complete = false;
-                presentation::warning(format!(
-                    "Could not release older project mounts on {}",
-                    target.name
-                ))
-            }
-        }
-    }
-
     let script = removal_script(&tag);
     let mut remote = RemoteCommand::to(&target, "sh".to_string(), vec!["-c".to_string(), script]);
     remote.tty = false;
@@ -82,13 +62,6 @@ pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
     }
 
     borrow_core::keys::forget_host(&target.host, target.port)?;
-    if target.legacy_mount() {
-        borrow_core::keys::deauthorize(&target.name)?;
-        presentation::success(format!(
-            "Removed {}'s older mount key from this machine's authorized_keys",
-            target.name
-        ));
-    }
 
     config.remove(&target.name)?;
     let saved = config.save()?;
@@ -117,21 +90,6 @@ fn removal_script(marker: &str) -> String {
          [ -f \"$f\" ] || exit 0; \
          t=$(mktemp) && grep -F -v -e {pattern} \"$f\" > \"$t\"; \
          cat \"$t\" > \"$f\" && rm -f \"$t\""
-    )
-}
-
-/// Release Phase 2 SSHFS mounts. `-z` detaches a mount even when something still has a
-/// file open in it, which is the only thing that reliably clears a stale one.
-fn unmount_script() -> String {
-    let base = shell_words::quote(borrow_core::artifacts::LEGACY_MOUNT_BASE);
-
-    format!(
-        "[ -d {base} ] || exit 0; \
-         for d in {base}/*; do \
-           [ -d \"$d\" ] || continue; \
-           fusermount -u -z \"$d\" >/dev/null 2>&1 || true; \
-           rmdir \"$d\" >/dev/null 2>&1 || true; \
-         done"
     )
 }
 

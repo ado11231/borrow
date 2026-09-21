@@ -71,10 +71,6 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
         identity_file: Some(private_key.clone()),
         known_hosts: Some(known_hosts.clone()),
         program: paired.program.clone(),
-        mount_user: None,
-        mount_host: None,
-        mount_identity_file: None,
-        mount_known_hosts: None,
         specs: Some(paired.specs),
     });
 

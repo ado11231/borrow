@@ -25,14 +25,16 @@ pub enum Request {
     },
 }
 
-/// What the Agent answers. `Error` carries a sentence meant for a human.
+/// What the Agent answers. Pairing is all this port does, so the only outcomes are a
+/// successful pairing and an `Error` carrying a sentence meant for a human.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Response {
-    Info(Specs),
-    Health(Health),
-    Paired(Paired),
-    Error { message: String },
+    /// Boxed because it carries the box's full specs, which dwarf an error message.
+    Paired(Box<Paired>),
+    Error {
+        message: String,
+    },
 }
 
 /// Everything `link` needs to be able to reach the box from now on.
@@ -46,17 +48,7 @@ pub struct Paired {
     /// The box's ssh host keys, so the Client can recognise it later without
     /// anybody being asked to eyeball a fingerprint.
     pub host_keys: Vec<String>,
-    /// Retired Phase 2 mount fields. New Agents send them empty.
-    #[serde(default)]
-    pub mount_key: String,
-    #[serde(default)]
-    pub mount_identity_file: String,
-    #[serde(default)]
-    pub mount_known_hosts: String,
-    #[serde(default)]
-    pub client_address: String,
     /// The Agent's Borrow program path, so the Client can start helpers over SSH.
-    #[serde(default)]
     pub program: Option<String>,
     pub specs: Specs,
 }

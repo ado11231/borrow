@@ -104,7 +104,7 @@ async fn accept_loop(listener: TcpListener, agent: Arc<Agent>) {
             Ok((stream, peer)) => {
                 let agent = Arc::clone(&agent);
                 tokio::spawn(async move {
-                    if let Err(e) = handle(stream, agent, peer.ip()).await {
+                    if let Err(e) = handle(stream, agent).await {
                         warn!("request from {peer} failed: {e:#}");
                     }
                 });
@@ -116,7 +116,7 @@ async fn accept_loop(listener: TcpListener, agent: Arc<Agent>) {
 
 /// Read one request, write one response. Anything that goes wrong comes back as an
 /// Error response rather than a dropped connection, so the Client can explain it.
-async fn handle(mut stream: TcpStream, agent: Arc<Agent>, peer: IpAddr) -> anyhow::Result<()> {
+async fn handle(mut stream: TcpStream, agent: Arc<Agent>) -> anyhow::Result<()> {
     let mut line = String::new();
     let mut reader = BufReader::new((&mut stream).take(PAIRING_LIMIT));
     tokio::time::timeout(PAIRING_TIMEOUT, reader.read_line(&mut line))
@@ -124,7 +124,7 @@ async fn handle(mut stream: TcpStream, agent: Arc<Agent>, peer: IpAddr) -> anyho
         .context("Pairing request timed out")??;
 
     let response = match serde_json::from_str::<Request>(line.trim()) {
-        Ok(request) => answer(request, &agent, peer),
+        Ok(request) => answer(request, &agent),
         Err(e) => Response::Error {
             message: format!("Could not understand that request: {e}"),
         },
@@ -137,7 +137,7 @@ async fn handle(mut stream: TcpStream, agent: Arc<Agent>, peer: IpAddr) -> anyho
     Ok(())
 }
 
-fn answer(request: Request, agent: &Agent, peer: IpAddr) -> Response {
+fn answer(request: Request, agent: &Agent) -> Response {
     match request {
         Request::Info | Request::Health => Response::Error {
             message: "This Agent answers info and health only over SSH. Update Borrow on the Client and run borrow link again".to_string(),
@@ -146,31 +146,26 @@ fn answer(request: Request, agent: &Agent, peer: IpAddr) -> Response {
             token,
             client,
             public_key,
-            user,
-            host_keys,
+            ..
         } => pair(
             agent,
             &token,
             &Client {
                 name: client,
                 public_key,
-                _user: user,
-                _host_keys: host_keys,
             },
-            peer,
         ),
     }
 }
 
-/// Client identity received during pairing.
+/// Client identity received during pairing. The Client also sends its own account name
+/// and host keys, which nothing needs now that trust runs one way.
 struct Client {
     name: String,
     public_key: String,
-    _user: String,
-    _host_keys: Vec<String>,
 }
 
-fn pair(agent: &Agent, token: &str, client: &Client, peer: IpAddr) -> Response {
+fn pair(agent: &Agent, token: &str, client: &Client) -> Response {
     let claimed = {
         let mut slot = agent.pairing.lock().expect("pairing lock was poisoned");
 
@@ -193,15 +188,15 @@ fn pair(agent: &Agent, token: &str, client: &Client, peer: IpAddr) -> Response {
             message: "That pairing code has expired or was already used; run borrow serve again for a fresh one".to_string(),
         },
         Some(false) => Response::Error { message: "That pairing code is not right".to_string() },
-        Some(true) => match accept(agent, client, peer) {
-            Ok(paired) => Response::Paired(paired),
+        Some(true) => match accept(agent, client) {
+            Ok(paired) => Response::Paired(Box::new(paired)),
             Err(e) => Response::Error { message: format!("Could not finish pairing: {e:#}") },
         },
     }
 }
 
 /// Authorize the Client key for SSH execution and private control.
-fn accept(agent: &Agent, client: &Client, peer: IpAddr) -> anyhow::Result<Paired> {
+fn accept(agent: &Agent, client: &Client) -> anyhow::Result<Paired> {
     let authorized = keys::authorize(&client.name, &client.public_key)
         .context("Could not add the Client's key to authorized_keys")?;
 
@@ -213,10 +208,6 @@ fn accept(agent: &Agent, client: &Client, peer: IpAddr) -> anyhow::Result<Paired
         name: agent.name.clone(),
         user: agent.user.clone(),
         host_keys: keys::host_keys(),
-        mount_key: String::new(),
-        mount_identity_file: String::new(),
-        mount_known_hosts: String::new(),
-        client_address: peer.to_string(),
         program: std::env::current_exe()
             .ok()
             .and_then(|path| path.to_str().map(str::to_string)),

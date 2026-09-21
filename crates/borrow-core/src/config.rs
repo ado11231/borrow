@@ -43,12 +43,6 @@ pub struct Agent {
     /// Where the Borrow program lives on the Agent, reported at pairing.
     #[serde(default)]
     pub program: Option<String>,
-    /// Legacy Phase 2 mount settings. Still read so older config files load, but no
-    /// longer used for execution.
-    pub mount_user: Option<String>,
-    pub mount_host: Option<String>,
-    pub mount_identity_file: Option<String>,
-    pub mount_known_hosts: Option<String>,
     /// What the box is, fetched once at pairing so `info` is instant.
     pub specs: Option<Specs>,
 }
@@ -57,11 +51,6 @@ impl Agent {
     /// The daemon port to dial, falling back to the built in default.
     pub fn daemon_port(&self) -> u16 {
         self.daemon_port.unwrap_or(DEFAULT_PORT)
-    }
-
-    /// Whether this box was paired for Phase 2 SSHFS mounts, which unlink still releases.
-    pub fn legacy_mount(&self) -> bool {
-        self.mount_user.is_some() || self.mount_identity_file.is_some()
     }
 
     /// The Borrow program to start over SSH. Pairing records the Agent's own path, so a
@@ -313,10 +302,6 @@ mod tests {
             identity_file: None,
             known_hosts: None,
             program: None,
-            mount_user: None,
-            mount_host: None,
-            mount_identity_file: None,
-            mount_known_hosts: None,
             specs: None,
         }
     }
@@ -398,25 +383,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// Config written during Phase 2 still loads, and is recognised as a legacy mount.
     #[test]
-    fn a_phase_two_config_still_loads() {
-        let config = config(
-            r#"
-            [[agents]]
-            name = "archbox"
-            host = "archbox.local"
-            user = "me"
-            mount_user = "me"
-            mount_host = "100.64.0.2"
-            mount_identity_file = "/home/ado/.ssh/borrow_mount_ed25519"
-            mount_known_hosts = "/home/ado/.config/borrow/known_hosts"
-            "#,
-        );
-        let agent = config.resolve(None).unwrap();
-
-        assert!(agent.legacy_mount());
-        assert_eq!(agent.program(), "borrow");
-        assert!(!self::agent("fresh").legacy_mount());
+    fn an_agent_with_no_recorded_program_falls_back_to_the_path() {
+        assert_eq!(agent("archbox").program(), "borrow");
     }
 }

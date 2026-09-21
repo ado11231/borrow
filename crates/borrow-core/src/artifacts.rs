@@ -4,10 +4,6 @@
 use crate::stack::{Project, Stack};
 use std::path::{Path, PathBuf};
 
-/// Where Phase 2 SSHFS mounts appeared. Only `borrow unlink` still looks here, to
-/// release mounts left by an older pairing.
-pub const LEGACY_MOUNT_BASE: &str = "/mnt/borrow";
-
 /// A project's source copy and the separate folder its build output is sent to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layout {

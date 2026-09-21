@@ -11,7 +11,9 @@ use anyhow::{Context, bail, ensure};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-pub const VERSION: u32 = 3;
+/// Wire version of this control protocol. Both machines must agree on it, so any change
+/// to a request or response shape has to raise it.
+pub const VERSION: u32 = 4;
 
 /// Largest frame in either direction. Manifests for very large projects are the limit.
 pub const MAX_FRAME: u32 = 16 * 1024 * 1024;
