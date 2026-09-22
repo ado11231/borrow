@@ -92,7 +92,7 @@ pub fn warnings(workspace: &Path) -> Vec<String> {
     )
 }
 
-pub fn resource_warnings(
+fn resource_warnings(
     used_mib: u64,
     total_mib: u64,
     workspace_free_mib: Option<u64>,
@@ -120,7 +120,7 @@ pub fn resource_warnings(
 }
 
 /// Available bytes on the file system holding `path`, chosen by the longest mount point.
-pub fn free_bytes(path: &Path) -> Option<u64> {
+fn free_bytes(path: &Path) -> Option<u64> {
     let path = path.canonicalize().ok()?;
     let disks = Disks::new_with_refreshed_list();
     disks

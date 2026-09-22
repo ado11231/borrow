@@ -67,7 +67,7 @@ pub async fn interact(target: &Agent, remote: &RemoteCommand, lost: String) -> a
 
 /// Said instead of SSH's own messages. A run belongs to its connection, so the Agent
 /// stops it once it notices, and sessions are the way to outlive a disconnect.
-pub fn lost_connection(name: &str) -> String {
+fn lost_connection(name: &str) -> String {
     format!(
         "Lost connection to {name}. The Agent stops the run once it notices, unless it finishes first. See how it ended with borrow ps --all, and use borrow attach for work that must survive a disconnect"
     )
@@ -91,7 +91,7 @@ pub fn show_warnings(result: anyhow::Result<Response>) {
 
 /// The line printed before anything runs. Saying where the work happens is a hard
 /// requirement, including which project folder and what build output moved.
-pub fn announcement(name: &str, local: Option<&Local>) -> String {
+fn announcement(name: &str, local: Option<&Local>) -> String {
     let mut line = format!("▶ Running on {name}");
 
     let Some(local) = local else {

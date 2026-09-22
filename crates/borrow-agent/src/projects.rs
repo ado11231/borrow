@@ -53,7 +53,7 @@ impl Paths {
         self.environment.join("names.json")
     }
 
-    pub fn sync_state(&self) -> StateDir {
+    fn sync_state(&self) -> StateDir {
         StateDir::new(&self.state)
     }
 }

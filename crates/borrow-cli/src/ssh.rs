@@ -65,12 +65,12 @@ impl RemoteCommand {
         }
     }
 
-    pub fn command_line(&self) -> String {
+    fn command_line(&self) -> String {
         join(std::iter::once(self.program.as_str()).chain(self.args.iter().map(|s| s.as_str())))
     }
 
     /// SSH options and the destination, without any remote command.
-    pub fn connection_args(&self) -> Vec<String> {
+    fn connection_args(&self) -> Vec<String> {
         let mut argv = Vec::new();
 
         for option in SSH_OPTIONS {

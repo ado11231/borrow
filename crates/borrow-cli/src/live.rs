@@ -5,7 +5,7 @@ use crossterm::{cursor, execute, queue, terminal};
 use std::io::{IsTerminal, Write};
 use std::time::{Duration, Instant};
 
-pub const REFRESH: Duration = Duration::from_secs(2);
+const REFRESH: Duration = Duration::from_secs(2);
 
 /// Puts the terminal back exactly as it was, including after errors and panics.
 struct Screen;
@@ -96,7 +96,7 @@ fn quit_requested(wait: Duration) -> anyhow::Result<bool> {
     }
 }
 
-pub fn is_quit(code: KeyCode, modifiers: KeyModifiers) -> bool {
+fn is_quit(code: KeyCode, modifiers: KeyModifiers) -> bool {
     match code {
         KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => true,
         KeyCode::Char('c') | KeyCode::Char('C') => modifiers.contains(KeyModifiers::CONTROL),

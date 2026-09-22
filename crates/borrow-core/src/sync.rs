@@ -29,12 +29,6 @@ pub struct Plan {
     pub baseline: Manifest,
 }
 
-impl Plan {
-    pub fn is_noop(&self) -> bool {
-        self.changes.is_empty() && self.conflicts.is_empty()
-    }
-}
-
 pub fn plan(base: &Manifest, sender: &Manifest, receiver: &Manifest) -> Plan {
     let mut result = Plan {
         baseline: base.clone(),
@@ -105,7 +99,7 @@ impl StateDir {
         self.dir.join("baseline.json")
     }
 
-    pub fn journal_file(&self) -> PathBuf {
+    fn journal_file(&self) -> PathBuf {
         self.dir.join("journal.json")
     }
 
@@ -272,6 +266,55 @@ fn check_parents(root: &Path, name: &str, deleted: &BTreeSet<&str>) -> anyhow::R
     Ok(())
 }
 
+/// Put one path into its final state. `entry` of `None` deletes it. Content is staged
+/// beside the destination, given its mode, and renamed over the top, so a crash leaves
+/// either the old file or the new one and never a half written mix.
+///
+/// `from` is the directory holding the replacement content. `verify` re-hashes it after
+/// the copy, which is worth doing for content that crossed the network and not for a
+/// backup this machine wrote itself.
+fn install(
+    root: &Path,
+    dest: &Path,
+    name: &str,
+    entry: Option<&Entry>,
+    from: &Path,
+    verify: bool,
+    token: &str,
+) -> anyhow::Result<()> {
+    let Some(entry) = entry else {
+        fs::remove_file(dest)?;
+        remove_empty_parents(root, name);
+        return Ok(());
+    };
+
+    storage::create_parents(root, name)?;
+    let temp = partial_path(dest, token);
+    let _ = fs::remove_file(&temp);
+    match &entry.link {
+        Some(target) => std::os::unix::fs::symlink(target, &temp)?,
+        None => {
+            copy_file(&storage::safe_path(from, name)?, &temp)?;
+            if verify {
+                ensure!(
+                    source::hash_file(&temp)? == entry.hash,
+                    "Staged content changed while it was being installed"
+                );
+            }
+            let old = fs::symlink_metadata(dest)
+                .ok()
+                .filter(|m| m.is_file())
+                .map(|m| m.permissions().mode());
+            fs::set_permissions(
+                &temp,
+                fs::Permissions::from_mode(mode(old, entry.executable)),
+            )?;
+        }
+    }
+    fs::rename(&temp, dest)?;
+    Ok(())
+}
+
 fn apply_step(
     root: &Path,
     stage: &Path,
@@ -283,37 +326,15 @@ fn apply_step(
     if step.before.is_some() {
         copy_entry(&dest, backup, &step.name)?;
     }
-    match &step.after {
-        None => {
-            fs::remove_file(&dest)?;
-            remove_empty_parents(root, &step.name);
-        }
-        Some(after) => {
-            storage::create_parents(root, &step.name)?;
-            let temp = partial_path(&dest, token);
-            let _ = fs::remove_file(&temp);
-            match &after.link {
-                Some(target) => std::os::unix::fs::symlink(target, &temp)?,
-                None => {
-                    copy_file(&storage::safe_path(stage, &step.name)?, &temp)?;
-                    ensure!(
-                        source::hash_file(&temp)? == after.hash,
-                        "Staged content changed while it was being installed"
-                    );
-                    let old = fs::symlink_metadata(&dest)
-                        .ok()
-                        .filter(|m| m.is_file())
-                        .map(|m| m.permissions().mode());
-                    fs::set_permissions(
-                        &temp,
-                        fs::Permissions::from_mode(mode(old, after.executable)),
-                    )?;
-                }
-            }
-            fs::rename(&temp, &dest)?;
-        }
-    }
-    Ok(())
+    install(
+        root,
+        &dest,
+        &step.name,
+        step.after.as_ref(),
+        stage,
+        true,
+        token,
+    )
 }
 
 /// Keep the receiver's existing read and write bits and change only execute bits.
@@ -427,38 +448,21 @@ fn undo_step(root: &Path, journal: &Journal, step: &Step) -> anyhow::Result<()> 
         "It changed after the sync was interrupted"
     );
     let dest = storage::safe_path(root, &step.name)?;
-    match &step.before {
-        None => {
-            fs::remove_file(&dest)?;
-            remove_empty_parents(root, &step.name);
-        }
-        Some(before) => {
-            let saved = storage::safe_path(&journal.backup, &step.name)?;
-            ensure!(
-                source::entry(&journal.backup, &step.name)?.is_some_and(|e| e.hash == before.hash),
-                "Its backup is missing or incomplete"
-            );
-            storage::create_parents(root, &step.name)?;
-            let temp = partial_path(&dest, &journal.token);
-            let _ = fs::remove_file(&temp);
-            match &before.link {
-                Some(target) => std::os::unix::fs::symlink(target, &temp)?,
-                None => {
-                    copy_file(&saved, &temp)?;
-                    let old = fs::symlink_metadata(&dest)
-                        .ok()
-                        .filter(|m| m.is_file())
-                        .map(|m| m.permissions().mode());
-                    fs::set_permissions(
-                        &temp,
-                        fs::Permissions::from_mode(mode(old, before.executable)),
-                    )?;
-                }
-            }
-            fs::rename(&temp, &dest)?;
-        }
+    if let Some(before) = &step.before {
+        ensure!(
+            source::entry(&journal.backup, &step.name)?.is_some_and(|e| e.hash == before.hash),
+            "Its backup is missing or incomplete"
+        );
     }
-    Ok(())
+    install(
+        root,
+        &dest,
+        &step.name,
+        step.before.as_ref(),
+        &journal.backup,
+        false,
+        &journal.token,
+    )
 }
 
 fn prune_backups(state: &StateDir) {
@@ -597,7 +601,7 @@ mod tests {
     fn a_deletion_on_both_sides_is_agreement() {
         let base = manifest(&[("x", "a")]);
         let plan = plan(&base, &Manifest::new(), &Manifest::new());
-        assert!(plan.is_noop());
+        assert!(plan.changes.is_empty() && plan.conflicts.is_empty());
         assert!(plan.baseline.is_empty());
     }
 

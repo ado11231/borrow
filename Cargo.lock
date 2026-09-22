@@ -112,7 +112,6 @@ dependencies = [
  "serde",
  "serde_json",
  "shell-words",
- "sysinfo",
  "tokio",
  "tracing-subscriber",
 ]

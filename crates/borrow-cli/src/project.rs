@@ -63,7 +63,7 @@ struct Registry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Registered {
+pub(crate) struct Registered {
     pub id: String,
     pub agent: String,
     pub root: PathBuf,

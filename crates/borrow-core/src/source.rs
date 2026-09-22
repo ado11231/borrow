@@ -52,7 +52,7 @@ const GENERATED: &[&str] = &[
 ];
 
 /// `.env`, `.env.local`, `.env.example`, `prod.env`, and `.envrc`, including templates.
-pub fn is_environment_name(name: &str) -> bool {
+fn is_environment_name(name: &str) -> bool {
     name == ".env" || name.starts_with(".env.") || name.ends_with(".env") || name == ".envrc"
 }
 
@@ -82,7 +82,7 @@ pub fn environment_target(target: &str) -> anyhow::Result<()> {
 
 /// The exclusions no setting can override. `target` counts as generated only beside a
 /// `Cargo.toml`, so a source folder that happens to be called target is still copied.
-pub fn always_excluded(path: &str, has_file: impl Fn(&str) -> bool) -> bool {
+fn always_excluded(path: &str, has_file: impl Fn(&str) -> bool) -> bool {
     let parts: Vec<&str> = path.split('/').collect();
     parts.iter().enumerate().any(|(index, name)| {
         if is_environment_name(name)
@@ -172,7 +172,7 @@ struct SyncSettings {
 }
 
 /// Read `sync.exclude` from `borrow.toml`.
-pub fn project_excludes(root: &Path) -> anyhow::Result<Vec<String>> {
+fn project_excludes(root: &Path) -> anyhow::Result<Vec<String>> {
     let file = root.join("borrow.toml");
     let text = match fs::read_to_string(&file) {
         Ok(text) => text,
@@ -184,7 +184,7 @@ pub fn project_excludes(root: &Path) -> anyhow::Result<Vec<String>> {
     Ok(settings.sync.exclude)
 }
 
-pub fn validate_excludes(patterns: &[String]) -> anyhow::Result<()> {
+fn validate_excludes(patterns: &[String]) -> anyhow::Result<()> {
     ensure!(patterns.len() <= 10_000, "Too many exclusion patterns");
     for pattern in patterns {
         ensure!(
@@ -232,10 +232,10 @@ impl Rules {
 
 /// Cached hashes keyed by path, reused while size, times, inode, and mode are unchanged.
 #[derive(Default, Serialize, Deserialize)]
-pub struct HashCache(HashMap<String, Stamp>);
+struct HashCache(HashMap<String, Stamp>);
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
-pub struct Stamp {
+struct Stamp {
     len: u64,
     mtime: i64,
     mtime_nsec: i64,

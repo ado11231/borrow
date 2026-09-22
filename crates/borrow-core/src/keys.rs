@@ -141,7 +141,7 @@ pub fn authorize(peer: &str, public_key: &str) -> anyhow::Result<PathBuf> {
 }
 
 /// Set owner permissions for SSH files.
-pub fn set_mode(path: &std::path::Path, mode: u32) -> anyhow::Result<()> {
+fn set_mode(path: &std::path::Path, mode: u32) -> anyhow::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -165,26 +165,6 @@ fn authorized_line(peer: &str, public_key: &str) -> anyhow::Result<String> {
         }
         _ => anyhow::bail!("That does not look like an SSH public key"),
     }
-}
-
-/// Remove the key carrying this peer's Borrow marker.
-pub fn deauthorize(peer: &str) -> anyhow::Result<()> {
-    let file = ssh_dir()?.join("authorized_keys");
-
-    if !file.exists() {
-        return Ok(());
-    }
-
-    let tag = marker(peer);
-    let existing = fs::read_to_string(&file)?;
-
-    let kept: Vec<String> = existing
-        .lines()
-        .filter(|line| !line.trim().is_empty() && !line.ends_with(&tag))
-        .map(|line| line.to_string())
-        .collect();
-
-    write_lines(&file, &kept)
 }
 
 pub fn ssh_dir() -> anyhow::Result<PathBuf> {

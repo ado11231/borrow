@@ -21,7 +21,7 @@ use tokio::io::AsyncReadExt;
 /// Ping interval while rsync runs, so the Agent keeps the lease for a live Client.
 const HEARTBEAT: Duration = Duration::from_secs(20);
 
-pub struct ProjectSession {
+pub(crate) struct ProjectSession {
     pub control: Control,
     pub project: ProjectInfo,
     pub id: String,
@@ -451,7 +451,7 @@ async fn with_heartbeat(
 }
 
 /// A readable preview of a plan. Words, not symbols, say what would happen.
-pub fn preview_text(
+fn preview_text(
     plan: &Plan,
     sender: &Manifest,
     receiver: &Manifest,

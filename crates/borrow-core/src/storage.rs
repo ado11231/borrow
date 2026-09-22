@@ -80,6 +80,29 @@ pub fn relative(value: &str) -> anyhow::Result<&Path> {
     Ok(path)
 }
 
+/// Walk the parents of a relative path, refusing any level that exists but is not a real
+/// directory. A level that is missing either ends the walk or is created, which is the
+/// only difference between checking a path and preparing one.
+fn walk_parents(root: &Path, rel: &Path, name: &str, create: bool) -> anyhow::Result<()> {
+    let mut current = root.to_path_buf();
+    let parts: Vec<_> = rel.components().collect();
+    for part in &parts[..parts.len() - 1] {
+        current.push(part);
+        match fs::symlink_metadata(&current) {
+            Ok(meta) => ensure!(
+                meta.is_dir() && !meta.file_type().is_symlink(),
+                "Unsafe parent path for {name}"
+            ),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => match create {
+                true => fs::create_dir(&current)?,
+                false => break,
+            },
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(())
+}
+
 /// Join a relative path under a root after confirming no existing parent is a symlink,
 /// so writes can never be redirected outside the root.
 pub fn safe_path(root: &Path, name: &str) -> anyhow::Result<PathBuf> {
@@ -91,39 +114,13 @@ pub fn safe_path(root: &Path, name: &str) -> anyhow::Result<PathBuf> {
         "Root must be a real directory: {}",
         root.display()
     );
-    let mut current = root.to_path_buf();
-    let parts: Vec<_> = rel.components().collect();
-    for part in &parts[..parts.len() - 1] {
-        current.push(part);
-        match fs::symlink_metadata(&current) {
-            Ok(meta) => ensure!(
-                meta.is_dir() && !meta.file_type().is_symlink(),
-                "Unsafe parent path for {name}"
-            ),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
-            Err(e) => return Err(e.into()),
-        }
-    }
+    walk_parents(root, rel, name, false)?;
     Ok(root.join(rel))
 }
 
 /// Create missing parents of a safe path, checking each level as it is created.
 pub fn create_parents(root: &Path, name: &str) -> anyhow::Result<()> {
-    let rel = relative(name)?;
-    let mut current = root.to_path_buf();
-    let parts: Vec<_> = rel.components().collect();
-    for part in &parts[..parts.len() - 1] {
-        current.push(part);
-        match fs::symlink_metadata(&current) {
-            Ok(meta) => ensure!(
-                meta.is_dir() && !meta.file_type().is_symlink(),
-                "Unsafe parent path for {name}"
-            ),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => fs::create_dir(&current)?,
-            Err(e) => return Err(e.into()),
-        }
-    }
-    Ok(())
+    walk_parents(root, relative(name)?, name, true)
 }
 
 pub fn write_json<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
