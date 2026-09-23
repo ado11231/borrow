@@ -1059,7 +1059,9 @@ Built in this order, each step a working tool:
 * Menu bar indicator with a live health readout. *Built:* `mac/menubar/` is a small SwiftUI
   app. The menu bar shows only its icon. Clicking it opens a panel with the box, the path
   in use, and four colored sections: CPU, RAM, GPU with its usage, VRAM, and temperature,
-  and workspace space, each drawn as a bar.
+  and workspace space, each drawn as a bar. While the box is offline the panel says why in
+  plain words, shows the command that fixes it and where to run it, offers Try again, and
+  keeps the last known numbers greyed out.
 * Notifications. *Built:* a long run finishing or failing, an interrupted job, the box
   becoming unreachable and coming back, and RAM, workspace disk, or GPU temperature
   crossing the high limit. Server up and needs input are still to do.

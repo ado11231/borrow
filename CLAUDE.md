@@ -235,7 +235,7 @@ The menu bar app in `mac/menubar/` is SwiftUI and only draws what the hidden
 `slingshot-cli/src/watch/`, never in Swift. `slingshot menubar` opens it, and
 `mac/menubar/build.sh` builds and installs it.
 
-The current suite contains 196 passing tests, and formatting and Clippy pass. The Phase 3
+The current suite contains 198 passing tests, and formatting and Clippy pass. The Phase 3
 flows were accepted on a real Mac Client and Arch Linux Agent, including a network drop
 mid build, a daemon restart, and an Agent reboot. Phase 4 was checked on the same two
 machines: `run` via the local network, the tailnet, and iroh from a phone hotspot, the

@@ -691,17 +691,19 @@ What exists:
 
 1. `crates/slingshot-cli/src/watch/mod.rs` is the hidden `slingshot internal-watch`. It keeps one control connection, polls `Health` every two seconds and `Jobs` every four, reconnects with a backoff of 2, 5, 15, then 30 seconds, probes the path again after losing the box, and reloads the configuration each time. It exits when its input closes.
 
-2. `watch/event.rs` defines the JSON lines, version 1: a `status` line with values and a good, warning, or high level for each, and a `notice` line with a title and body.
+2. `watch/event.rs` defines the JSON lines, version 1: a `status` line with values and a good, warning, or high level for each, and a `notice` line with a title and body. While offline, the status also carries a problem: a plain title and sentence, and a fix naming the command and the machine to run it on. A `retry` line on the helper's input skips the reconnect wait.
 
 3. `watch/state.rs` decides notifications. The first job list only sets a baseline. A run of ten seconds or more that completes or fails is told once, interrupted jobs are always told, and stopped runs and ended sessions stay quiet. Two failed checks in a row mean unreachable, told once, then back. RAM, workspace disk, and GPU temperature warn once when they cross the high limit and re-arm only after recovering. The limits are the ones `slingshot health` uses, shared from `commands/health.rs`.
 
 4. `commands/menubar.rs` is `slingshot menubar`. On macOS it saves this program's path in the app's settings, because an app opened at login has no shell PATH, and opens the app. Elsewhere it says the menu bar is macOS only. `link` ends with a tip about it on macOS.
 
-5. `mac/menubar/` is the SwiftUI app: an icon in the menu bar and a `MenuBarExtra` panel with CPU, RAM, GPU, and workspace sections drawn as colored bars, rows for Open at login and Quit, `UserNotifications` for banners, and `SMAppService` to start at login, turned on at first launch. `build.sh` builds it, signs it ad hoc, and installs it in `~/Applications`.
+5. `mac/menubar/` is the SwiftUI app: an icon in the menu bar and a `MenuBarExtra` panel with CPU, RAM, GPU, and workspace sections drawn as colored bars, rows for Open at login and Quit, an offline screen with the cause, the fix command with a copy button, Try again, when the box was last seen, and the last known numbers greyed out, `UserNotifications` for banners, and `SMAppService` to start at login, turned on at first launch. `build.sh` builds it, signs it ad hoc, and installs it in `~/Applications`.
 
 Verified on September 23, 2026: the new tests pass; `internal-watch` reached archbox via iroh and printed status lines every two seconds, then exited when its input closed; the app built, installed, opened with `slingshot menubar`, started its helper, and was registered as an enabled login item. archbox then stopped answering, which the helper reported as offline, and the menu bar showed offline.
 
 After archbox was turned on and `slingshot start` run there, the menu bar switched to live numbers without restarting the app or pairing again. The panel showed archbox via the local network, CPU, RAM, the RTX 4060's use and temperature, VRAM, and workspace space. `slingshot run sh -c 'sleep 12; exit 3'` produced one failure banner once notifications were allowed in System Settings, and `slingshot run echo hi` produced none.
+
+With `slingshot start` stopped on archbox, the offline screen said Slingshot was not running there and offered `slingshot start`, and it switched back to live numbers by itself once `start` ran again.
 
 Not yet verified: the back notification, resource warnings, and behavior across a log out and log in. On the first install, banners appeared only after notifications were turned on for Slingshot in System Settings. Whether the permission prompt showed is not recorded, so a clear first run prompt still needs checking.
 
@@ -717,7 +719,7 @@ Prepare public releases, installers, packages, diagnostics, licensing, contribut
 
 Verified on September 22, 2026.
 
-The full Rust workspace builds successfully. All 196 automated tests pass, and formatting checks and Clippy pass. The Phase 3 flows were accepted on a real Mac Client and Arch Linux Agent, recorded in section 11. The Phase 4 checks run on those two machines are recorded in section 11c. The full Phase 3 flows have not yet been run again over iroh.
+The full Rust workspace builds successfully. All 198 automated tests pass, and formatting checks and Clippy pass. The Phase 3 flows were accepted on a real Mac Client and Arch Linux Agent, recorded in section 11. The Phase 4 checks run on those two machines are recorded in section 11c. The full Phase 3 flows have not yet been run again over iroh.
 
 The tests cover:
 
