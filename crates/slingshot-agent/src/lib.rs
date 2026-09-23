@@ -13,7 +13,9 @@ use anyhow::Context;
 use slingshot_core::keys;
 use slingshot_core::network::Network;
 use slingshot_core::preflight;
+use slingshot_core::presentation::{self, Style, Tone};
 use slingshot_core::protocol::{Paired, Request, Response};
+use slingshot_core::step;
 use slingshot_core::telemetry;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::path::PathBuf;
@@ -90,17 +92,13 @@ pub async fn start(name: Option<String>, port: u16) -> anyhow::Result<i32> {
 
     let endpoint = tunnel::start(identity, agent.root.clone()).await?;
 
-    announce(&name, &addresses, &token);
-
     let _awake = match awake::hold() {
         Some(awake) => {
-            slingshot_core::presentation::success(
-                "Keeping this machine awake while Slingshot runs",
-            );
+            presentation::success("Keeping this machine awake while Slingshot runs");
             Some(awake)
         }
         None => {
-            slingshot_core::presentation::warning(
+            presentation::warning(
                 "Could not stop this machine from sleeping. If it sleeps, other machines cannot reach it until it wakes",
             );
             None
@@ -125,22 +123,29 @@ pub async fn start(name: Option<String>, port: u16) -> anyhow::Result<i32> {
         tasks.push(tokio::spawn(accept_loop(listener, agent)));
     }
 
-    tokio::spawn(report_reach(endpoint.clone()));
+    report_reach(&endpoint).await;
+    announce(&name, &addresses, &token);
 
     tokio::signal::ctrl_c().await.ok();
-    eprintln!("\nStopping");
+    eprintln!();
     endpoint.close().await;
+    presentation::success(format!("Stopped Slingshot on {name}"));
 
     Ok(0)
 }
 
-/// Say once whether other networks can reach this box. The same network works either way.
-async fn report_reach(endpoint: iroh::Endpoint) {
-    match tunnel::online(&endpoint).await {
-        true => slingshot_core::presentation::success("Reachable from other networks through iroh"),
-        false => slingshot_core::presentation::warning(
-            "No iroh relay answered, so other networks cannot reach this box yet. The same network still works, and Slingshot keeps trying",
-        ),
+/// Say once whether other networks can reach this box, before the pairing code so the code
+/// stays the last thing on screen. The same network works either way.
+async fn report_reach(endpoint: &iroh::Endpoint) {
+    let step = step::start("Connecting to iroh relays");
+    match tunnel::online(endpoint).await {
+        true => step.done("Reachable from other networks through iroh"),
+        false => {
+            step.clear();
+            presentation::warning(
+                "No iroh relay answered, so other networks cannot reach this box yet. The same network still works, and Slingshot keeps trying",
+            );
+        }
     }
 }
 
@@ -256,8 +261,8 @@ fn accept(agent: &Agent, client: &Client) -> anyhow::Result<Paired> {
         .context("Could not add the Client's key to authorized_keys")?;
 
     info!("paired with {}", client.name);
-    slingshot_core::presentation::success(format!("Paired with {}", client.name));
-    slingshot_core::presentation::detail("Authorized", authorized.display());
+    presentation::success(format!("Paired with {}", client.name));
+    presentation::detail("Authorized", presentation::home_path(&authorized));
 
     Ok(Paired {
         name: agent.name.clone(),
@@ -319,17 +324,6 @@ fn local_ip_towards(target: &str) -> Option<IpAddr> {
     }
 }
 
-/// A label for an address, so somebody reading two pairing codes can tell which one
-/// reaches them.
-fn network_label(ip: IpAddr) -> &'static str {
-    match Network::of(&ip.to_string()) {
-        Network::ThisMachine => "This machine",
-        Network::Local => "Local network",
-        Network::Other => "Network",
-        Network::Tailnet => "Tailscale",
-    }
-}
-
 /// Print the pairing token only to the owner's console, never to logs or files.
 /// Show a complete copyable command for each available address.
 fn announce(name: &str, addresses: &[SocketAddr], token: &str) {
@@ -340,8 +334,13 @@ fn announce(name: &str, addresses: &[SocketAddr], token: &str) {
         false => reachable,
     };
 
+    let style = Style::stderr();
     eprintln!();
-    slingshot_core::presentation::progress(format!("Slingshot is running on {name}"));
+    eprintln!(
+        "{} Slingshot is running on {}",
+        style.paint("▶", Tone::Info),
+        style.paint(name, Tone::Info)
+    );
     eprintln!();
 
     if offered.is_empty() {
@@ -349,11 +348,7 @@ fn announce(name: &str, addresses: &[SocketAddr], token: &str) {
         return;
     }
 
-    match offered.len() {
-        1 => eprintln!("  On the other machine, run:"),
-        _ => eprintln!("  On the other machine, run whichever reaches this box:"),
-    }
-
+    eprintln!("  To pair, run this on a machine on the same network or tailnet:");
     eprintln!();
 
     let commands: Vec<(String, &str)> = offered
@@ -361,7 +356,7 @@ fn announce(name: &str, addresses: &[SocketAddr], token: &str) {
         .map(|addr| {
             (
                 format!("slingshot link {}:{}:{token}", addr.ip(), addr.port()),
-                network_label(addr.ip()),
+                Network::of(&addr.ip().to_string()).name(),
             )
         })
         .collect();
@@ -369,15 +364,21 @@ fn announce(name: &str, addresses: &[SocketAddr], token: &str) {
     let width = commands.iter().map(|(c, _)| c.len()).max().unwrap_or(0);
 
     for (command, label) in &commands {
-        eprintln!("      {command:<width$}   ({label})");
+        eprintln!(
+            "    {}   {}",
+            style.paint(format!("{command:<width$}"), Tone::Info),
+            style.dim(label)
+        );
     }
 
     eprintln!();
     eprintln!(
-        "  The code works once and expires in {} minutes",
-        CODE_LIFETIME.as_secs() / 60
+        "  {}",
+        style.dim(format!(
+            "The code works once and expires in {} minutes. Press Ctrl C to stop",
+            CODE_LIFETIME.as_secs() / 60
+        ))
     );
-    eprintln!("  Press Ctrl C to stop");
     eprintln!();
 }
 

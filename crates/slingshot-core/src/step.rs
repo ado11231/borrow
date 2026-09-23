@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 /// Finished lines pad their text to this width so the times line up.
 const TEXT_WIDTH: usize = 38;
 
+const INSTANT: Duration = Duration::from_millis(100);
+
 pub struct Step {
     bar: Option<ProgressBar>,
     started: Instant,
@@ -66,14 +68,19 @@ impl Step {
     /// Remove the spinner and print nothing, for a step whose error is reported elsewhere.
     pub fn clear(self) {}
 
+    /// An instant step gets no time, because `0.0s` says nothing.
     fn finish(mut self, text: impl std::fmt::Display, tone: Tone) {
         self.hide();
         let style = Style::stderr();
-        eprintln!(
-            "{} {}",
-            style.status(pad(&text.to_string()), tone),
-            style.dim(elapsed(self.started.elapsed()))
-        );
+        let took = self.started.elapsed();
+        match took < INSTANT {
+            true => eprintln!("{}", style.status(text, tone)),
+            false => eprintln!(
+                "{} {}",
+                style.status(pad(&text.to_string()), tone),
+                style.dim(elapsed(took))
+            ),
+        }
     }
 
     fn hide(&mut self) {
