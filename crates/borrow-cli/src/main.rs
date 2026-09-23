@@ -5,6 +5,7 @@ mod commands;
 mod keys;
 mod live;
 mod project;
+mod route;
 mod ssh;
 mod transfer;
 
@@ -240,6 +241,9 @@ fn internal_rsh(args: Vec<String>) -> anyhow::Result<i32> {
         std::env::var("BORROW_RSH_AGENT").map_err(|_| anyhow::anyhow!("Missing Agent name"))?;
     let config = borrow_core::config::Config::load()?;
     let agent = config.resolve(Some(&name))?;
+    if let Ok(host) = std::env::var(route::ROUTE_ENV) {
+        route::assume(agent, &host);
+    }
     Err(ssh::exec_for_rsync(agent, args))
 }
 

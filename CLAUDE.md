@@ -85,10 +85,11 @@ see output                                              keeps project copies
 ```
 
 **Paths, tried in order.** The Client tries the Agent's saved local address, then its
-tailnet address, then iroh, and uses the first that answers. Every command says which one
-it used. iroh dials the Agent by its public key, punches through NAT to connect directly
-when it can, and falls back to a public relay when it cannot. Either way ssh runs inside,
-so a relay only ever carries encrypted bytes.
+tailnet address, then iroh, and uses the first that answers. `run` and `attach` say
+which one they used, as in `▶ Running on archbox via tailnet`. iroh dials the Agent by
+its public key, punches through NAT to connect directly when it can, and falls back to a
+public relay when it cannot. Either way ssh runs inside, so a relay only ever carries
+encrypted bytes.
 
 **Transport, already decided.** The **daemon is the control plane**, owning identity,
 pairing, job records, health, sessions, sync leases, and reachability. **ssh is the data

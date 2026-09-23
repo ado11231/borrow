@@ -6,6 +6,7 @@
 
 use crate::client::{Control, unexpected};
 use crate::project::{self, Local};
+use crate::route;
 use anyhow::{Context, bail, ensure};
 use borrow_core::config::Agent;
 use borrow_core::control::{ProjectInfo, ProjectRef, Request, Response, Snapshot};
@@ -370,6 +371,7 @@ async fn rsync(
         .arg(from)
         .arg(to)
         .env("BORROW_RSH_AGENT", &agent.name)
+        .env(route::ROUTE_ENV, route::resolve(agent).host)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())

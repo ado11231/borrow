@@ -8,6 +8,7 @@ pub mod service;
 
 use anyhow::Context;
 use borrow_core::keys;
+use borrow_core::network::Network;
 use borrow_core::preflight;
 use borrow_core::protocol::{Paired, Request, Response};
 use borrow_core::telemetry;
@@ -44,6 +45,7 @@ struct Pairing {
 struct Agent {
     name: String,
     user: String,
+    addresses: Vec<String>,
     pairing: Mutex<Option<Pairing>>,
 }
 
@@ -60,17 +62,22 @@ pub async fn serve(name: Option<String>, port: u16) -> anyhow::Result<i32> {
     let _service = service::start(name.clone())?;
     let user = whoami().context("Could not work out which user is running the daemon")?;
     let token = new_token();
+    let addresses = bind_addresses(port);
 
     let agent = Arc::new(Agent {
         name: name.clone(),
         user,
+        addresses: addresses
+            .iter()
+            .filter(|addr| !addr.ip().is_loopback())
+            .map(|addr| addr.ip().to_string())
+            .collect(),
         pairing: Mutex::new(Some(Pairing {
             token: token.clone(),
             expires: Instant::now() + CODE_LIFETIME,
         })),
     });
 
-    let addresses = bind_addresses(port);
     announce(&name, &addresses, &token);
 
     let mut listeners = Vec::new();
@@ -211,6 +218,7 @@ fn accept(agent: &Agent, client: &Client) -> anyhow::Result<Paired> {
         program: std::env::current_exe()
             .ok()
             .and_then(|path| path.to_str().map(str::to_string)),
+        addresses: agent.addresses.clone(),
         specs: telemetry::specs(&agent.name),
     })
 }
@@ -262,21 +270,14 @@ fn local_ip_towards(target: &str) -> Option<IpAddr> {
     }
 }
 
-/// A label for an address, so somebody reading two pairing codes can tell which
-/// one reaches them. Derived from the address itself rather than from how it was
-/// found, because a box routing everything over a VPN would otherwise mislabel it.
+/// A label for an address, so somebody reading two pairing codes can tell which one
+/// reaches them.
 fn network_label(ip: IpAddr) -> &'static str {
-    let IpAddr::V4(v4) = ip else {
-        return "Network";
-    };
-
-    let [first, second, ..] = v4.octets();
-
-    match () {
-        _ if v4.is_loopback() => "This machine",
-        _ if first == 100 && (64..128).contains(&second) => "Tailscale",
-        _ if v4.is_private() => "Local network",
-        _ => "Network",
+    match Network::of(&ip.to_string()) {
+        Network::ThisMachine => "This machine",
+        Network::Local => "Local network",
+        Network::Other => "Network",
+        Network::Tailnet => "Tailscale",
     }
 }
 
@@ -351,39 +352,5 @@ pub(crate) mod testing {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_tailnet_address_is_named() {
-        assert_eq!(network_label("100.67.90.119".parse().unwrap()), "Tailscale");
-    }
-
-    #[test]
-    fn a_home_network_address_is_named() {
-        assert_eq!(
-            network_label("10.0.0.193".parse().unwrap()),
-            "Local network"
-        );
-        assert_eq!(
-            network_label("192.168.1.7".parse().unwrap()),
-            "Local network"
-        );
-    }
-
-    /// 100.x is only a tailnet address inside the carrier grade NAT range. A public
-    /// address that merely starts with 100 must not be mistaken for one.
-    #[test]
-    fn a_public_hundred_address_is_not_tailscale() {
-        assert_eq!(network_label("100.20.0.1".parse().unwrap()), "Network");
-    }
-
-    #[test]
-    fn loopback_is_named_as_this_machine() {
-        assert_eq!(network_label("127.0.0.1".parse().unwrap()), "This machine");
     }
 }

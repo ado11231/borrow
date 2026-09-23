@@ -2,11 +2,13 @@
 
 use crate::client::{self, Refused};
 use crate::project::{self, Local};
+use crate::route;
 use crate::ssh::{Disconnected, RemoteCommand};
 use crate::transfer;
 use borrow_core::artifacts;
 use borrow_core::config::{Agent, Config};
 use borrow_core::control::{Request, Response};
+use borrow_core::network::Network;
 use borrow_core::presentation::{self, Style};
 
 /// Run `cmd` on the Agent and return its exit code. A non zero code is not an
@@ -42,7 +44,11 @@ pub async fn run(agent: Option<String>, cmd: Vec<String>) -> anyhow::Result<i32>
 
     eprintln!(
         "{}",
-        Style::stderr().heading(announcement(&target.name, local.as_ref()))
+        Style::stderr().heading(announcement(
+            &target.name,
+            route::resolve(target).network,
+            local.as_ref()
+        ))
     );
 
     let remote = RemoteCommand::to(target, target.program().to_string(), args);
@@ -90,9 +96,9 @@ pub fn show_warnings(result: anyhow::Result<Response>) {
 }
 
 /// The line printed before anything runs. Saying where the work happens is a hard
-/// requirement, including which project folder and what build output moved.
-fn announcement(name: &str, local: Option<&Local>) -> String {
-    let mut line = format!("▶ Running on {name}");
+/// requirement, including the path taken, which project folder, and what build output moved.
+fn announcement(name: &str, network: Network, local: Option<&Local>) -> String {
+    let mut line = format!("▶ Running on {name} via {}", network.name());
 
     let Some(local) = local else {
         return line;
@@ -132,14 +138,21 @@ mod tests {
 
     #[test]
     fn outside_a_project_it_only_says_where() {
-        assert_eq!(announcement("archbox", None), "▶ Running on archbox");
+        assert_eq!(
+            announcement("archbox", Network::Local, None),
+            "▶ Running on archbox via local network"
+        );
     }
 
     #[test]
     fn inside_a_project_it_names_the_folder_and_what_moved() {
         assert_eq!(
-            announcement("archbox", Some(&local("crates/cli", vec![Stack::Rust]))),
-            "▶ Running on archbox · app/crates/cli · target → Agent disk"
+            announcement(
+                "archbox",
+                Network::Tailnet,
+                Some(&local("crates/cli", vec![Stack::Rust]))
+            ),
+            "▶ Running on archbox via tailnet · app/crates/cli · target → Agent disk"
         );
     }
 
@@ -156,8 +169,8 @@ mod tests {
     #[test]
     fn a_project_with_no_known_stack_still_reports_its_folder() {
         assert_eq!(
-            announcement("archbox", Some(&local("", Vec::new()))),
-            "▶ Running on archbox · app"
+            announcement("archbox", Network::Local, Some(&local("", Vec::new()))),
+            "▶ Running on archbox via local network · app"
         );
     }
 }

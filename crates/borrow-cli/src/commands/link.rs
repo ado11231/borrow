@@ -65,6 +65,7 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
         identity_file: Some(private_key.clone()),
         known_hosts: Some(known_hosts.clone()),
         program: paired.program.clone(),
+        addresses: paired.addresses.clone(),
         specs: Some(paired.specs),
     });
 
@@ -85,6 +86,9 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
             paired.host_keys.len()
         ),
     );
+    if !paired.addresses.is_empty() {
+        borrow_core::presentation::detail("Addresses", paired.addresses.join(", "));
+    }
     borrow_core::presentation::detail("Saved", saved.display());
     eprintln!();
     eprintln!("  Try it:   borrow run uname -a");

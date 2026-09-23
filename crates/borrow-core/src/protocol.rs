@@ -50,6 +50,10 @@ pub struct Paired {
     pub host_keys: Vec<String>,
     /// The Agent's Borrow program path, so the Client can start helpers over SSH.
     pub program: Option<String>,
+    /// Every address the box answers on, so the Client can switch to another one when the
+    /// address it paired on stops answering.
+    #[serde(default)]
+    pub addresses: Vec<String>,
     pub specs: Specs,
 }
 

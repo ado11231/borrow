@@ -1,6 +1,7 @@
 //! `borrow attach [path]`: open or rejoin the project's persistent session.
 
 use crate::project;
+use crate::route;
 use crate::ssh::{self, RemoteCommand};
 use crate::transfer;
 use borrow_core::config::Config;
@@ -46,8 +47,10 @@ pub async fn attach(
     eprintln!(
         "{}",
         Style::stderr().heading(format!(
-            "▶ {verb} a session on {} · {}",
-            target.name, local.name
+            "▶ {verb} a session on {} via {} · {}",
+            target.name,
+            route::resolve(target).network.name(),
+            local.name
         ))
     );
     eprintln!("  Detach with the tmux prefix then D, which is Ctrl B then D by default");

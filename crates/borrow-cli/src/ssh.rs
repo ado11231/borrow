@@ -1,5 +1,6 @@
 //! Building and running SSH commands to the Agent.
 
+use crate::route;
 use anyhow::Context;
 use borrow_core::config;
 use shell_words::join;
@@ -35,6 +36,9 @@ pub struct RemoteCommand {
     pub port: Option<u16>,
     pub identity_file: Option<PathBuf>,
     pub known_hosts: Option<PathBuf>,
+    /// The name the box's host keys were learned under, which stays the same whichever
+    /// address is dialed.
+    pub host_key_alias: Option<String>,
     /// Whether to ask for a terminal on the box. See `wants_terminal`.
     pub tty: bool,
     pub program: String,
@@ -42,15 +46,17 @@ pub struct RemoteCommand {
 }
 
 impl RemoteCommand {
-    /// Build a command aimed at a saved box. Everything ssh needs comes from the
-    /// config, so nobody has to keep an entry in `~/.ssh/config` in step with this.
+    /// Build a command aimed at a saved box, over whichever of its addresses answers.
+    /// Everything ssh needs comes from the config, so nobody has to keep an entry in
+    /// `~/.ssh/config` in step with this.
     pub fn to(agent: &config::Agent, program: String, args: Vec<String>) -> RemoteCommand {
         RemoteCommand {
-            host: agent.host.clone(),
+            host: route::resolve(agent).host,
             user: Some(agent.user.clone()),
             port: agent.port,
             identity_file: agent.identity_file.clone(),
             known_hosts: agent.known_hosts.clone(),
+            host_key_alias: Some(agent.host.clone()),
             tty: wants_terminal(),
             program,
             args,
@@ -95,6 +101,11 @@ impl RemoteCommand {
             argv.push(format!("UserKnownHostsFile=\"{}\"", known_hosts.display()));
             argv.push("-o".to_string());
             argv.push("StrictHostKeyChecking=yes".to_string());
+        }
+
+        if let Some(alias) = &self.host_key_alias {
+            argv.push("-o".to_string());
+            argv.push(format!("HostKeyAlias={alias}"));
         }
 
         if self.tty {
@@ -285,6 +296,7 @@ mod tests {
             port: None,
             identity_file: None,
             known_hosts: None,
+            host_key_alias: None,
             tty: false,
             program: "echo".to_string(),
             args: args.iter().map(|s| s.to_string()).collect(),
@@ -401,6 +413,21 @@ mod tests {
             argv.contains(&"UserKnownHostsFile=\"/App Support/known_hosts\"".to_string()),
             "argv was: {argv:?}"
         );
+    }
+
+    #[test]
+    fn host_keys_are_checked_under_the_pairing_name_whatever_address_is_dialed() {
+        let mut command = remote(&["hi"]);
+        command.host = "100.67.90.119".to_string();
+        command.host_key_alias = Some("192.168.1.20".to_string());
+
+        let argv = command.to_ssh_args();
+
+        assert!(
+            argv.contains(&"HostKeyAlias=192.168.1.20".to_string()),
+            "argv was: {argv:?}"
+        );
+        assert_eq!(argv[argv.len() - 2], "100.67.90.119");
     }
 
     #[test]

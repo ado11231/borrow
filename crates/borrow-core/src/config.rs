@@ -1,5 +1,6 @@
 //! Where the Client remembers which Agent to talk to.
 
+use crate::network::Network;
 use crate::protocol::{DEFAULT_PORT, Specs};
 use anyhow::Context;
 use directories::ProjectDirs;
@@ -43,6 +44,9 @@ pub struct Agent {
     /// Where the Borrow program lives on the Agent, reported at pairing.
     #[serde(default)]
     pub program: Option<String>,
+    /// Other addresses the box reported at pairing. Configs saved before this have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub addresses: Vec<String>,
     /// What the box is, fetched once at pairing so `info` is instant.
     pub specs: Option<Specs>,
 }
@@ -57,6 +61,19 @@ impl Agent {
     /// login shell without Borrow on its PATH still works.
     pub fn program(&self) -> &str {
         self.program.as_deref().unwrap_or("borrow")
+    }
+
+    /// Every address to try, best first: this machine, the local network, anything else,
+    /// then the tailnet. Ties keep the pairing address ahead of the rest.
+    pub fn candidates(&self) -> Vec<&str> {
+        let mut all: Vec<&str> = Vec::new();
+        for host in std::iter::once(&self.host).chain(&self.addresses) {
+            if !all.contains(&host.as_str()) {
+                all.push(host);
+            }
+        }
+        all.sort_by_key(|host| Network::of(host));
+        all
     }
 }
 
@@ -217,6 +234,23 @@ mod tests {
     }
 
     #[test]
+    fn a_tailnet_pairing_still_tries_the_local_network_first() {
+        let mut agent = config(ONE).resolve(None).unwrap().clone();
+        agent.host = "100.67.90.119".to_string();
+        agent.addresses = vec!["192.168.1.20".to_string(), "100.67.90.119".to_string()];
+
+        assert_eq!(agent.candidates(), ["192.168.1.20", "100.67.90.119"]);
+    }
+
+    #[test]
+    fn a_config_from_before_addresses_has_one_candidate() {
+        assert_eq!(
+            config(ONE).resolve(None).unwrap().candidates(),
+            ["archbox.local"]
+        );
+    }
+
+    #[test]
     fn default_is_used_when_no_agent_requested() {
         assert_eq!(config(TWO).resolve(None).unwrap().name, "laptop");
     }
@@ -302,6 +336,7 @@ mod tests {
             identity_file: None,
             known_hosts: None,
             program: None,
+            addresses: Vec::new(),
             specs: None,
         }
     }

@@ -4,6 +4,7 @@ pub mod artifacts;
 pub mod config;
 pub mod control;
 pub mod keys;
+pub mod network;
 pub mod preflight;
 pub mod presentation;
 pub mod protocol;
