@@ -1,7 +1,7 @@
-# borrow: Project Guide
+# slingshot: Project Guide
 
 Welcome. This is the single document to read before you touch the code. It explains what
-borrow is, who it is for, how the system is put together, why it is put together that way,
+slingshot is, who it is for, how the system is put together, why it is put together that way,
 and where the project is on its road to being publishable.
 
 This guide is the whole reference. Architecture, roadmap, and the real machine setup all
@@ -29,16 +29,16 @@ instructions rather than publishing as it stands.
 
 ## The short version
 
-**borrow lets a light machine use the RAM, CPU, and GPU of a heavy machine, without
+**slingshot lets a light machine use the RAM, CPU, and GPU of a heavy machine, without
 leaving the light machine.**
 
 You keep working exactly where you already work: your own editor, your own terminal, your
 own browser. The heavy parts of development go somewhere else. Builds, servers, databases,
 containers, coding agents, and small AI models all run on the powerful box. You keep
-editing your own files, and borrow copies eligible source to the box when work needs it.
+editing your own files, and slingshot copies eligible source to the box when work needs it.
 
 ```bash
-borrow run cargo build
+slingshot run cargo build
 ▶ Running on archbox
    Compiling ...
 ```
@@ -63,10 +63,10 @@ Today you have three bad options.
 * **Run a VM or a remote desktop.** Now you are looking at a video stream of a computer.
   It feels wrong immediately and it never stops feeling wrong.
 
-borrow takes a fourth path. Your machine stays your machine. It becomes a very thin
+slingshot takes a fourth path. Your machine stays your machine. It becomes a very thin
 control surface that builds commands, hands them to the powerful box, and streams the
 output back. The powerful box does all the actual work on a filtered copy of your project
-that borrow keeps in step with your machine.
+that slingshot keeps in step with your machine.
 
 ## Who it is for
 
@@ -92,7 +92,7 @@ Saying no clearly is part of the design.
   on physics, not preference.
 * **Not a remote desktop.** No GUI streaming, no video of another computer. Tools like
   Sunshine and Moonlight already do that well.
-* **Not a new SSH, filesystem, container engine, or inference engine.** borrow wraps `ssh`,
+* **Not a new SSH, filesystem, container engine, or inference engine.** slingshot wraps `ssh`,
   `rsync`, `tmux`, `docker`, `ollama`, and `nvidia-smi`. Writing our own versions of proven
   infrastructure would be both slower to build and much harder for anyone to trust.
 
@@ -138,7 +138,7 @@ Every design decision in this repo is checked against these seven rules.
 
 The Client is a command builder and a pipe.
 
-That really is the whole trick. borrow figures out what should run, where it should run,
+That really is the whole trick. slingshot figures out what should run, where it should run,
 and with which environment, then hands that off to ssh and forwards the resulting bytes
 back to your terminal. Everything else in the architecture exists to make that one motion
 feel effortless and safe.
@@ -173,16 +173,16 @@ feel effortless and safe.
 This is the most important architectural choice in the project, so it gets the most space.
 
 Two questions get conflated when people design a tool like this: **who decides**, and
-**what carries the bytes**. borrow answers them separately.
+**what carries the bytes**. slingshot answers them separately.
 
-* **The control plane is the borrow daemon.** It owns identity, pairing, the process table,
+* **The control plane is the slingshot daemon.** It owns identity, pairing, the process table,
   health, sessions, and knowing how to reach the box. This is what a user installs and
   thinks of as "my connection to my machine."
 * **The data plane is ssh.** It is the pipe the daemon hands you once the daemon has
   decided where and how.
 
 The user never types an ssh command, never edits `~/.ssh/config`, and never learns a
-hostname. The daemon did all of that for them. Yet borrow never wrote an encryption layer,
+hostname. The daemon did all of that for them. Yet slingshot never wrote an encryption layer,
 and every security auditor on earth already trusts the transport. For an open source tool
 that asks strangers to run a daemon on their personal desktop, that second point matters
 enormously.
@@ -195,8 +195,8 @@ Concretely, two channels doing different jobs:
 | Channel | Carries | Why this channel |
 | --- | --- | --- |
 | **ssh**, shelled out to | `run`, `attach`, and rsync transfers, anything that executes or copies bytes | Authentication, encryption, TTY handling, and live stdout and stderr streaming already work correctly. Rewriting them is the textbook definition of rebuilding an existing system. |
-| **borrow daemon**, on a private Unix socket reached through ssh | `info`, `health`, sync leases, sessions, `ps`, `stop`, environment files, unlink cleanup | These want typed messages, not a text stream. A hidden helper started over ssh relays them to a socket only the Agent account can open, so every structured request is authenticated by ssh too. |
-| **borrow daemon**, on its TCP port | Pairing only | A new Client has no key yet. The single use code is the only thing this port accepts. |
+| **slingshot daemon**, on a private Unix socket reached through ssh | `info`, `health`, sync leases, sessions, `ps`, `stop`, environment files, unlink cleanup | These want typed messages, not a text stream. A hidden helper started over ssh relays them to a socket only the Agent account can open, so every structured request is authenticated by ssh too. |
+| **slingshot daemon**, on its TCP port | Pairing only | A new Client has no key yet. The single use code is the only thing this port accepts. |
 
 **Why not one custom channel for everything?** Because you would own message framing,
 reconnection, backpressure, and remote process lifecycle *before your first command ever
@@ -212,14 +212,14 @@ The daemon grows on a schedule:
 * **Phase 4.** Also runs an iroh endpoint that dials outward to iroh's relays, which is what
   makes cross network use possible through a home router. Paired Clients reach its sshd
   through that endpoint.
-* **Phase 7.** The very same daemon is what a stranger installs. `serve` and `link` are the
+* **Phase 7.** The very same daemon is what a stranger installs. `start` and `link` are the
   entire setup experience.
 
 ## How a command flows
 
-Walk through `borrow run cargo build` end to end.
+Walk through `slingshot run cargo build` end to end.
 
-1. You type `borrow run cargo build` on the Client.
+1. You type `slingshot run cargo build` on the Client.
 2. The Client finds the project: the enclosing Git repository, or else the nearest project
    marker. It looks up the persistent project ID for this project and this Agent.
 3. Over one ssh control connection the Client opens the project, takes a sync lease, and
@@ -227,14 +227,14 @@ Walk through `borrow run cargo build` end to end.
    staging, and the Agent verifies and applies them. Nothing moves when nothing changed.
 4. The Client asks for resource warnings and prints any.
 5. The Client prints `▶ Running on archbox · app/src · target → local disk` and spawns
-   `ssh archbox 'borrow internal-run --project <id> --cwd src -- cargo build'`.
+   `ssh archbox 'slingshot internal-run --project <id> --cwd src -- cargo build'`.
 6. The Agent runs the command in the matching folder of the source copy as its own process
    group, with build output redirected to separate Agent storage. Output streams back
    byte for byte and the exit code propagates.
 
 Step 6 has two details that are easy to get wrong and important to get right. Output must
 **stream** rather than buffer, or the tool feels frozen. And the exit code must
-**propagate**, so `borrow run false` exits 1. Without that, borrow is useless inside scripts
+**propagate**, so `slingshot run false` exits 1. Without that, slingshot is useless inside scripts
 and CI.
 
 ## Files: source copies and the artifact split
@@ -243,8 +243,8 @@ This is the make or break performance detail of the entire project.
 
 * Your project's **source files live on the Client**. That is where you edit them.
 * The Agent keeps a **filtered copy** of eligible source on its own disk, one copy per
-  project and Agent. `borrow run` brings it up to date before every run. `borrow sync` pushes,
-  `borrow sync --pull` retrieves edits made on the Agent, and `--check` previews either.
+  project and Agent. `slingshot run` brings it up to date before every run. `slingshot sync` pushes,
+  `slingshot sync --pull` retrieves edits made on the Agent, and `--check` previews either.
 * **Build artifacts are never copied.** They are redirected to separate Agent storage.
 
 ```
@@ -252,11 +252,11 @@ This is the make or break performance detail of the entire project.
    ~/projects/myapp/                      <data>/agent/projects/<id>/
      ├── src/        ── rsync changes ──►   ├── source/        eligible files only
      ├── Cargo.toml                         ├── artifacts/     target, node_modules, venv
-     ├── .env        ✗ never copied         ├── environment/   files from borrow env, 600
+     ├── .env        ✗ never copied         ├── environment/   files from slingshot env, 600
      └── target/     ✗ never copied         └── state/         baseline, journal, backups
 ```
 
-`<data>` is Borrow's platform data directory, such as `~/.local/share/borrow` on Linux.
+`<data>` is Slingshot's platform data directory, such as `~/.local/share/slingshot` on Linux.
 
 **Why copies replaced the Phase 2 mount.** SSHFS made the Agent dial back into the Client,
 which required a second SSH trust and an SSH server on the Client. That broke golden rule 7
@@ -275,7 +275,7 @@ needs only Client to Agent SSH, and survives sleep and network loss.
 3. Generated folders such as `node_modules`, `.venv`, `__pycache__`, and caches at any depth,
    and `target` beside a `Cargo.toml`.
 4. `.env`, `.env.*`, `*.env`, and `.envrc` at every depth, including templates.
-5. `sync.exclude` patterns from `borrow.toml`, which can add exclusions but cannot override
+5. `sync.exclude` patterns from `slingshot.toml`, which can add exclusions but cannot override
    the mandatory ones.
 
 Relative symlinks are kept when their resolved target stays inside eligible source. A link
@@ -284,7 +284,7 @@ A file that becomes ignored after it was copied keeps its last shared state, so 
 ignore rules never deletes or transfers anything by itself.
 
 **Sync safety.** Each side lists its files with SHA256 hashes, executable bits, and link
-targets. Borrow compares the sender, the receiver, and the last shared baseline:
+targets. Slingshot compares the sender, the receiver, and the last shared baseline:
 
 1. Changed only on the sender: copied.
 2. Changed only on the receiver: kept.
@@ -304,10 +304,10 @@ copies actually agree.
 Applying a sync requires the project to be idle. A run, a session, or another sync holds the
 project, and new work waits for recovery.
 
-**Environment files** stay out of source entirely. `borrow env add --file <local> --target
+**Environment files** stay out of source entirely. `slingshot env add --file <local> --target
 <path>` sends the contents inside the ssh control message, never as a command argument, and
 stores them in a private folder with owner only permissions. The Agent exposes each one at
-its target through a Borrow managed link. Replacing needs `--replace`, `list` shows names
+its target through a Slingshot managed link. Replacing needs `--replace`, `list` shows names
 only, and nothing keeps secret backups. The Agent account can read these files, and no
 encryption at rest is promised.
 
@@ -321,14 +321,14 @@ did.
 | `Cargo.toml` | `CARGO_TARGET_DIR` points at Agent local disk |
 | `package.json` | `node_modules` linked to separate Agent storage |
 | `pyproject.toml` or `requirements.txt` | Virtual environment and pip cache kept Agent local |
-| Nothing detected, or an override | Whatever the project's `borrow.toml` says |
+| Nothing detected, or an override | Whatever the project's `slingshot.toml` says |
 
-A small per project `borrow.toml` marks a project and can add `sync.exclude` patterns. Split
+A small per project `slingshot.toml` marks a project and can add `sync.exclude` patterns. Split
 overrides are not applied yet.
 
 ## Terminal output
 
-Borrow uses compact aligned rows. Labels and sentences are capitalized consistently.
+Slingshot uses compact aligned rows. Labels and sentences are capitalized consistently.
 CPU, RAM, GPU, and VRAM stay uppercase. Machine names, paths, and commands keep their
 original spelling.
 
@@ -338,7 +338,7 @@ and disables colors for redirected output, a nonempty `NO_COLOR`, or `TERM=dumb`
 An explicit mode overrides those automatic choices. Help follows the same color choice.
 
 Information and health results go to stdout. Progress, setup checks, and errors go to
-stderr. Borrow does not change remote command output.
+stderr. Slingshot does not change remote command output.
 
 Health colors always include written status labels:
 
@@ -353,7 +353,7 @@ The three levels use green, yellow, and red. Missing or invalid measurements are
 Unavailable. Memory uses MiB and GiB with one decimal place. High utilization describes
 workload, not a failing machine.
 
-Before a run or a new session, Borrow warns when RAM use is at or above 90 percent or when
+Before a run or a new session, Slingshot warns when RAM use is at or above 90 percent or when
 the Agent workspace disk has less than 2 GiB free. Warnings never block the job, and a
 failed measurement never blocks valid work.
 
@@ -370,10 +370,10 @@ daemon.
   used and free, free disk, free workspace disk, GPU temperature and utilization.
 
 ```bash
-borrow info             # static specs, instant, from cache
-borrow health           # live snapshot right now
-borrow health --watch   # the same view, refreshed every two seconds
-borrow top              # live resources plus active Borrow jobs
+slingshot info             # static specs, instant, from cache
+slingshot health           # live snapshot right now
+slingshot health --watch   # the same view, refreshed every two seconds
+slingshot top              # live resources plus active Slingshot jobs
 ```
 
 Live views need a terminal, exit on Q or Ctrl C, and restore the terminal on exit.
@@ -419,7 +419,7 @@ wide release.
 
 ## Security model
 
-borrow installs ssh keys and runs arbitrary commands on somebody's personal desktop. For an
+slingshot installs ssh keys and runs arbitrary commands on somebody's personal desktop. For an
 open source tool that is a serious responsibility. These are design constraints from Phase
 1, because they are cheap to build in now and painful to retrofit later.
 
@@ -427,10 +427,10 @@ open source tool that is a serious responsibility. These are design constraints 
 
 * The pairing code is short lived, on the order of minutes, and single use. It is a bearer
   token: whoever holds it can install a key.
-* `serve` prints the code once, to the console of the machine's owner. It is never written
+* `start` prints the code once, to the console of the machine's owner. It is never written
   to a file, never logged, never transmitted anywhere.
 * Pairing installs exactly one named public key into `authorized_keys`, clearly marked as
-  belonging to borrow, so a human can find it and revoke it by hand.
+  belonging to slingshot, so a human can find it and revoke it by hand.
 * `link` reports exactly what it did: which key, which file, which host.
 
 **Daemon exposure**
@@ -445,26 +445,26 @@ open source tool that is a serious responsibility. These are design constraints 
   request, idle, and write timeouts. A mismatched version gets a message to update both
   machines.
 * The trust boundary is the Agent's operating system account. Clients sharing that account
-  can see each other's Borrow jobs and projects. Cleanup is still scoped to the projects each
+  can see each other's Slingshot jobs and projects. Cleanup is still scoped to the projects each
   Client registered.
 * Cross network reachability comes from the Agent dialing out, not from an inbound port.
   This is also why it works behind home routers with no configuration.
 
 **Keys**
 
-* borrow never generates a key silently. If it creates one, it says so and says where.
+* slingshot never generates a key silently. If it creates one, it says so and says where.
 * It never copies a private key between machines, under any circumstance.
 * New pairings create only Client to Agent trust. The Client needs no SSH server.
-* `borrow unlink` removes the key from the Agent and this Client's environment files, keeps
+* `slingshot unlink` removes the key from the Agent and this Client's environment files, keeps
   source copies and backups, and refuses while that Client's projects have active work.
 
 **Jobs**
 
 * Runs and sessions are recorded on disk and reconciled after a daemon restart or reboot.
 * A process is signalled only while its PID and start time both still match the record.
-* `borrow stop` sends a graceful signal, waits five seconds, then kills what remains of
+* `slingshot stop` sends a graceful signal, waits five seconds, then kills what remains of
   that process tree.
-* Sessions run on a Borrow owned tmux server with its own socket, so personal tmux sessions
+* Sessions run on a Slingshot owned tmux server with its own socket, so personal tmux sessions
   are never touched.
 
 **Execution**
@@ -478,7 +478,7 @@ open source tool that is a serious responsibility. These are design constraints 
 * The Agent keeps a persistent iroh secret key in its data directory, mode 600. Its public
   key is the Agent's iroh address and is given to the Client at pairing.
 * Each Client has its own iroh key. Pairing records the Client's public key on the Agent,
-  and the Agent accepts iroh connections only from recorded keys. `borrow unlink` removes
+  and the Agent accepts iroh connections only from recorded keys. `slingshot unlink` removes
   the record.
 * An accepted iroh stream is forwarded only to the Agent's own sshd on loopback. Nothing
   else is reachable through it, and ssh still authenticates the Client key and the pinned
@@ -504,7 +504,7 @@ connection open, polling health while a build runs.
 
 ### Memory and ownership in practice
 
-borrow is not a memory intensive program, and that is by design. The Client's job is to
+slingshot is not a memory intensive program, and that is by design. The Client's job is to
 shuttle bytes, not to hold them.
 
 The practical consequences you will see in the code:
@@ -514,14 +514,14 @@ The practical consequences you will see in the code:
   ever sit in a Client side buffer. This is a memory decision and a user experience
   decision at the same time, since buffering makes the tool feel hung.
 * **Owned `String` at struct boundaries.** `RemoteCommand` in `src/ssh.rs` holds owned
-  `String` and `Vec<String>` fields rather than borrowed slices. The struct is built in one
+  `String` and `Vec<String>` fields rather than slingshoted slices. The struct is built in one
   place and consumed in another, is tiny, and is created once per invocation. Adding
   lifetime parameters to save a handful of allocations would buy nothing and would make
-  every caller harder to write. Reach for borrows where data is large or hot; own it where
+  every caller harder to write. Reach for slingshots where data is large or hot; own it where
   the code reads better.
-* **Borrow inside the hot path.** Within `to_ssh_args`, the iteration over program and
+* **Slingshot inside the hot path.** Within `to_ssh_args`, the iteration over program and
   arguments works entirely in `&str`, and only the final joined command becomes a new
-  `String`. Own at the edges, borrow in the middle.
+  `String`. Own at the edges, slingshot in the middle.
 
 ### Concurrency with tokio
 
@@ -546,7 +546,7 @@ The convention is deliberately split by crate role.
 * **`anyhow` in binaries.** The CLI's job when something fails is to print a good message
   and exit. It does not need callers to match on error variants. `anyhow::Result` plus the
   `?` operator plus context strings gives exactly that.
-* **`anyhow` in `borrow-core` too, for now.** Typed library errors with `thiserror` remain
+* **`anyhow` in `slingshot-core` too, for now.** Typed library errors with `thiserror` remain
   planned rather than done. The two places that genuinely need matching already carry their
   own types and are downcast rather than string matched: `client::Refused` for an error the
   Agent reported, and `ssh::Disconnected` for a connection that dropped. That pattern is the
@@ -554,8 +554,8 @@ The convention is deliberately split by crate role.
 
 There is a nice distinction visible in `commands/run.rs` already. Its signature is
 `anyhow::Result<i32>`, and the doc comment explains why: a non zero exit code is **not** an
-error. borrow did its job perfectly, the command it ran happened to fail. An `Err` is
-reserved for borrow itself failing. Getting this boundary right is what makes the tool
+error. slingshot did its job perfectly, the command it ran happened to fail. An `Err` is
+reserved for slingshot itself failing. Getting this boundary right is what makes the tool
 compose properly in scripts.
 
 `main` mirrors that split when it exits. `Ok(code)` becomes the process exit code, while
@@ -578,9 +578,9 @@ cmd: Vec<String>,
 
 `trailing_var_arg` tells clap to stop parsing for itself once it reaches `run`, and
 `allow_hyphen_values` stops clap from treating a leading dash as one of its own flags.
-Together they mean that in `borrow run cargo build --release`, the `--release` reaches
-cargo untouched instead of being claimed by borrow. Without this, every remote tool's flags
-would collide with borrow's own, and the tool would be unusable for anything nontrivial.
+Together they mean that in `slingshot run cargo build --release`, the `--release` reaches
+cargo untouched instead of being claimed by slingshot. Without this, every remote tool's flags
+would collide with slingshot's own, and the tool would be unusable for anything nontrivial.
 
 ### Safe remote execution
 
@@ -662,23 +662,23 @@ will visibly be used by both sides.
 Done as the first task of Phase 2.
 
 ```
-borrow/
+slingshot/
 ├── Cargo.toml               # workspace root: member list and shared versions
 └── crates/
-    ├── borrow-core/src/     # config, control, protocol, source, sync, storage,
+    ├── slingshot-core/src/     # config, control, protocol, source, sync, storage,
     │                        # artifacts, stack, telemetry, preflight, presentation, keys
-    ├── borrow-agent/src/    # lib.rs pairing, service, projects, jobs, runner
-    └── borrow-cli/src/      # main.rs, client, transfer, project, live, ssh, keys, commands/
+    ├── slingshot-agent/src/    # lib.rs pairing, service, projects, jobs, runner
+    └── slingshot-cli/src/      # main.rs, client, transfer, project, live, ssh, keys, commands/
 ```
 
-**Three crates, but still one binary, and that is deliberate.** `borrow-core` and
-`borrow-agent` are libraries. `borrow-cli` is the only package that produces an executable,
-and `[[bin]] name = "borrow"` is what keeps `borrow serve` and `borrow run` working as
+**Three crates, but still one binary, and that is deliberate.** `slingshot-core` and
+`slingshot-agent` are libraries. `slingshot-cli` is the only package that produces an executable,
+and `[[bin]] name = "slingshot"` is what keeps `slingshot start` and `slingshot run` working as
 documented.
 
 The benefit being bought here is the **crate boundary**, not separate executables. A
-boundary is what makes the compiler refuse a cycle, so `borrow-agent` can never reach into
-`borrow-cli`. That enforcement is identical whether the result is one binary or two.
+boundary is what makes the compiler refuse a cycle, so `slingshot-agent` can never reach into
+`slingshot-cli`. That enforcement is identical whether the result is one binary or two.
 Splitting the executables is a distribution decision, and it can wait for Phase 7 when the
 installer and the systemd unit are being written. Splitting the crates is an architecture
 decision, and it only gets more expensive with time.
@@ -690,17 +690,17 @@ both ends.
 ### End state: the workspace
 
 ```
-borrow/
+slingshot/
 ├── Cargo.toml                  # workspace root listing member crates
 ├── docs/
 │
 ├── crates/
-│   ├── borrow-core/            # shared library, used by every binary
+│   ├── slingshot-core/            # shared library, used by every binary
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── protocol.rs     # pairing messages
 │   │       ├── control.rs      # authenticated control messages
-│   │       ├── config.rs       # config plus borrow.toml
+│   │       ├── config.rs       # config plus slingshot.toml
 │   │       ├── source.rs       # eligible source and manifests
 │   │       ├── sync.rs         # three way sync, apply, and recovery
 │   │       ├── artifacts.rs    # artifact split logic
@@ -709,28 +709,28 @@ borrow/
 │   │       ├── telemetry.rs    # specs and health types and collection
 │   │       └── error.rs        # shared error types
 │   │
-│   ├── borrow-cli/             # the borrow command on the Client
+│   ├── slingshot-cli/             # the slingshot command on the Client
 │   │   └── src/
 │   │       ├── main.rs
 │   │       └── commands/       # link, run, attach, sync, env, ps, stop, info, health, top
 │   │
-│   ├── borrow-agent/           # the daemon on the Agent, a library today
+│   ├── slingshot-agent/           # the daemon on the Agent, a library today
 │   │   └── src/
-│   │       ├── lib.rs          # borrow serve, called by the cli binary
+│   │       ├── lib.rs          # slingshot start, called by the cli binary
 │   │       ├── service.rs      # private control socket and ssh bridge
 │   │       ├── projects.rs     # source copies, leases, environment files
 │   │       ├── jobs.rs         # job records, tmux sessions, stopping
 │   │       └── runner.rs       # foreground runs
 │
 ├── deploy/
-│   ├── borrow-agent.service    # systemd unit
+│   ├── slingshot-agent.service    # systemd unit
 │   └── install.sh              # one line installer
 │
 └── mac/
     └── menubar/                # Mac only indicator and notifications
 ```
 
-**Why `borrow-core` exists.** The message format must be byte identical on both machines.
+**Why `slingshot-core` exists.** The message format must be byte identical on both machines.
 The source eligibility, sync, and artifact split logic is used by both the agent and the CLI. Telemetry types
 are shared between the agent that collects them and the CLI that displays them. Each of
 those is defined exactly once.
@@ -739,22 +739,22 @@ those is defined exactly once.
 
 ```bash
 # one time setup
-borrow serve            # Agent: start the daemon, print a pairing code
-borrow link <code>      # Client: connect and remember the box
-borrow unlink           # Client: remove borrow's key from the Agent
+slingshot start            # Agent: start the daemon, print a pairing code
+slingshot link <code>      # Client: connect and remember the box
+slingshot unlink           # Client: remove slingshot's key from the Agent
 
 # daily use
-borrow run <cmd>        # sync the project, run on the box, stream output back
-borrow attach [path]    # persistent session on the box, in the project copy
-borrow sync [path]      # push source changes; --pull retrieves, --check previews
-borrow env add|list|remove   # environment files kept outside source on the box
-borrow ps [--all]       # active Borrow runs and sessions, or recent history too
-borrow stop <id>        # stop a run or session
+slingshot run <cmd>        # sync the project, run on the box, stream output back
+slingshot attach [path]    # persistent session on the box, in the project copy
+slingshot sync [path]      # push source changes; --pull retrieves, --check previews
+slingshot env add|list|remove   # environment files kept outside source on the box
+slingshot ps [--all]       # active Slingshot runs and sessions, or recent history too
+slingshot stop <id>        # stop a run or session
 
 # see the box
-borrow info             # static specs, cached
-borrow health           # live snapshot; --watch keeps refreshing
-borrow top              # live resources and active jobs
+slingshot info             # static specs, cached
+slingshot health           # live snapshot; --watch keeps refreshing
+slingshot top              # live resources and active jobs
 ```
 
 ---
@@ -769,9 +769,9 @@ split.
 
 Implemented today:
 
-1. `serve` checks for an SSH server, rsync, tmux, and GPU tooling, starts the private
+1. `start` checks for an SSH server, rsync, tmux, and GPU tooling, starts the private
    control socket, and prints a single use pairing code.
-2. `link` installs the Client key on the Agent and records the Agent's Borrow path. The
+2. `link` installs the Client key on the Agent and records the Agent's Slingshot path. The
    Client needs no SSH server.
 3. `run` syncs eligible source, warns about resources, and runs in the matching folder of
    the Agent copy with terminal passthrough, exit codes, and cancellation.
@@ -781,7 +781,7 @@ Implemented today:
 7. `ps`, `ps --all`, and `stop` manage runs and sessions from persistent records.
 8. `info` and `health` use authenticated control. `health --watch` and `top` refresh live.
 9. `unlink` removes this Client's environment files, key, and learned host keys.
-10. `--agent` selects a machine. `--color auto|always|never` controls Borrow formatting.
+10. `--agent` selects a machine. `--color auto|always|never` controls Slingshot formatting.
 
 Current verification, on September 20, 2026: 149 automated tests pass, and formatting
 checks and Clippy pass. A loopback run on one Mac used a private unprivileged sshd, real
@@ -800,7 +800,7 @@ first `run cargo build` took 9 seconds including the copy, and the next started 
 
 A cleanup on September 20, 2026 deleted the retired Phase 2 mount surface from config and
 from the pairing message, raised the control protocol to version 4, removed dead code, gave
-duplicated helpers one home each in `borrow-core`, and renamed the identifiers that meant
+duplicated helpers one home each in `slingshot-core`, and renamed the identifiers that meant
 two different things. It also fixed four real defects: `authorized_keys` was rewritten by
 truncating in place, sync recovery read permissions through a symlink, the partial file
 prefix was written out twice, and `learn_host` and `forget_host` could disagree about the
@@ -811,14 +811,14 @@ Still outstanding:
 1. Re-pairing the two real machines, which the protocol bump now requires, and running the
    Phase 3 flows again against the cleaned up tree.
 2. Confirming on the real machines that a lost connection and an NVIDIA driver mismatch
-   now print Borrow's own messages. Both were fixed after acceptance.
+   now print Slingshot's own messages. Both were fixed after acceptance.
 3. File watchers inside sessions, multiple Clients sharing one Agent account, and large
    Node and Python projects.
-4. Applying split overrides from `borrow.toml`. Only `sync.exclude` is read today.
+4. Applying split overrides from `slingshot.toml`. Only `sync.exclude` is read today.
 5. Finish Phase 4: path selection and iroh.
 
 SSH host paths with spaces remain quoted, interactive commands request a terminal,
-and password fallback stays disabled. Borrow stores SSH options in its own configuration
+and password fallback stays disabled. Slingshot stores SSH options in its own configuration
 and does not write `~/.ssh/config`.
 
 See `docs/PROJECT_STATUS.md` for the simple file reference and phase record.
@@ -874,14 +874,14 @@ The demoable core, and the tokio learning vehicle.
 
 **To implement**
 
-* `main.rs` with all five subcommands: `serve`, `link`, `run`, `info`, `health`.
-* `config.rs` reading and writing `~/.config/borrow/config.toml`, holding box name, host or
+* `main.rs` with all five subcommands: `start`, `link`, `run`, `info`, `health`.
+* `config.rs` reading and writing `~/.config/slingshot/config.toml`, holding box name, host or
   IP, ssh user, daemon port, and cached specs.
 * `protocol.rs` with small serde derived request and response types.
 * `telemetry.rs` collecting specs and health via `sysinfo`, shelling out to `nvidia-smi`
   for GPU data, and degrading gracefully when there is no GPU, which is the Linux to Linux
   case.
-* `agent.rs` implementing `borrow serve`: print a pairing code, listen on the daemon port,
+* `agent.rs` implementing `slingshot start`: print a pairing code, listen on the daemon port,
   answer info and health requests. Read only, no state yet.
 * `ssh.rs` finished: spawn the built command with stdout and stderr streamed live, and
   return the real exit code.
@@ -895,12 +895,12 @@ This is not polish and it is not Phase 7 work. For every user who is not the aut
 checks *are* the setup experience. Each failure prints the exact command that fixes it, and
 nothing is ever auto installed.
 
-* `serve` checks: is sshd running, are `rsync` and `tmux` present, is GPU tooling available.
+* `start` checks: is sshd running, are `rsync` and `tmux` present, is GPU tooling available.
 * `link` checks: can the host be reached, does a key exist and if one is generated is that
   said out loud, is the Client's own sshd enabled for the Phase 2 mount.
 * Every failure is one line: `✗ sshfs not installed  →  sudo pacman -S sshfs`
 * Every success is one line too, so a working setup visibly passes.
-* `borrow unlink` gets built now. It is five lines here and an awkward retrofit later.
+* `slingshot unlink` gets built now. It is five lines here and an awkward retrofit later.
 
 **Security work that lands in this phase**
 
@@ -911,15 +911,15 @@ today.
 
 **Things to watch out for**
 
-* Exit codes must propagate. `borrow run false` has to exit 1 or the tool is useless in
+* Exit codes must propagate. `slingshot run false` has to exit 1 or the tool is useless in
   scripts.
 * Ctrl-C must kill the remote process, not merely detach the local one.
 * Stream, do not buffer. Output appearing only at the end makes `run` feel broken.
 * Quote the remote command correctly. Arguments containing spaces are where this breaks
   first, which is why the tests exist already.
 
-**Done when:** on the Client, `borrow run cargo build` builds a real project on the Agent
-with live output, and `borrow info` prints the box's specs. LAN only, no mount yet.
+**Done when:** on the Client, `slingshot run cargo build` builds a real project on the Agent
+with live output, and `slingshot info` prints the box's specs. LAN only, no mount yet.
 
 **This phase is demoable.**
 
@@ -937,7 +937,7 @@ live in three crates.
 
 **Implemented**
 
-* The workspace split into `borrow-core`, `borrow-cli`, and `borrow-agent`.
+* The workspace split into `slingshot-core`, `slingshot-cli`, and `slingshot-agent`.
 * `core/stack.rs` detecting `Cargo.toml`, `package.json`, and `pyproject.toml`.
 * `core/mount.rs` holding the artifact split rules per stack: environment variables and
   symlinks.
@@ -949,9 +949,9 @@ live in three crates.
   It reuses healthy mounts and recreates stale ones.
 * `run` now resolving the full chain: local project directory, to remote mount path, to
   split environment variables.
-* Saying what it did: `▶ Running on archbox · /mnt/borrow/app · target → local disk`.
+* Saying what it did: `▶ Running on archbox · /mnt/slingshot/app · target → local disk`.
 
-**Still outstanding:** Per project `borrow.toml` overrides and the acceptance checks below.
+**Still outstanding:** Per project `slingshot.toml` overrides and the acceptance checks below.
 
 **Things to watch out for**
 
@@ -972,7 +972,7 @@ The incremental number is still to be taken, and it is the more important of the
 this on the Agent before the mount lands:
 
 ```bash
-cd ~/borrow && touch src/main.rs && time cargo build --release
+cd ~/slingshot && touch src/main.rs && time cargo build --release
 ```
 
 A clean build is CPU bound, which is the kindest case for a network filesystem. An
@@ -1000,24 +1000,24 @@ Where the daemon starts doing things ssh cannot.
 * Authenticated control through a hidden ssh helper and a private Agent socket, with
   protocol versions, size limits, and timeouts. `info` and `health` moved there.
 * Filtered source copies with persistent project IDs, three way sync, staged application,
-  backups, and recovery. `borrow run` syncs before every run.
-* `borrow sync`, `borrow sync --pull`, and `--check` previews.
-* `borrow attach [path]` creates or rejoins one tmux session per project on an isolated
-  Borrow tmux server. Reattaching does not sync.
-* Persistent job records reconciled after restarts, `borrow ps`, `borrow ps --all` with the
-  latest 100 finished jobs, and `borrow stop` with a five second grace period.
-* `borrow env` for environment files kept outside source.
-* `borrow health --watch`, `borrow top`, and resource warnings before work starts.
+  backups, and recovery. `slingshot run` syncs before every run.
+* `slingshot sync`, `slingshot sync --pull`, and `--check` previews.
+* `slingshot attach [path]` creates or rejoins one tmux session per project on an isolated
+  Slingshot tmux server. Reattaching does not sync.
+* Persistent job records reconciled after restarts, `slingshot ps`, `slingshot ps --all` with the
+  latest 100 finished jobs, and `slingshot stop` with a five second grace period.
+* `slingshot env` for environment files kept outside source.
+* `slingshot health --watch`, `slingshot top`, and resource warnings before work starts.
 * Pairing without reverse trust, and unlink cleanup scoped to one Client's projects.
 
 **Watch out for:** do not write a terminal multiplexer. Wrap `tmux` on the Agent. Golden
 rule 3 applies here more than anywhere. The same goes for file copying: wrap rsync.
 
-**Done when:** you close the lid mid build, reopen, run `borrow attach`, and you are back in
+**Done when:** you close the lid mid build, reopen, run `slingshot attach`, and you are back in
 it, on a real Client and Agent pair. Met: the Client dropped its network for four minutes
 during a clean release build, and `attach` returned to the finished build.
 
-At the end of this phase borrow is an impressive, shippable personal tool.
+At the end of this phase slingshot is an impressive, shippable personal tool.
 
 ## Phase 4: Works from anywhere
 
@@ -1027,10 +1027,10 @@ exists to remove. **This phase gates publishing.**
 
 **Status: acceptance testing.** Steps 1 to 5 are built and were checked on the real
 machines on September 22, 2026. Step 5 also gained connection sharing over iroh and a lock
-that keeps the Agent awake while `serve` runs. See `docs/PROJECT_STATUS.md` section 11c.
+that keeps the Agent awake while `start` runs. See `docs/PROJECT_STATUS.md` section 11c.
 
 The goal in one sentence: once a Client is paired, the Agent is reachable from anywhere for
-as long as it is on and `borrow serve` is running, with no router change and no account.
+as long as it is on and `slingshot start` is running, with no router change and no account.
 
 Built in this order, each step a working tool:
 
@@ -1041,17 +1041,17 @@ Built in this order, each step a working tool:
 2. **iroh identities.** The Agent and each Client get a persistent iroh key. Pairing swaps
    the public halves, and the Agent records which Client keys may connect. `unlink` removes
    the record.
-3. **The Agent endpoint.** `borrow serve` runs an iroh endpoint, accepts connections only
+3. **The Agent endpoint.** `slingshot start` runs an iroh endpoint, accepts connections only
    from recorded Client keys, and forwards each stream to its own sshd on loopback.
-4. **The Client tunnel.** A hidden `borrow internal-tunnel` is ssh's `ProxyCommand` when no
+4. **The Client tunnel.** A hidden `slingshot internal-tunnel` is ssh's `ProxyCommand` when no
    direct path answers. `run`, `attach`, sync, and control all use it with no other change.
 5. **Clear failures.** "archbox is not reachable, it may be off or asleep" is told apart
-   from an authentication failure, and `serve` warns when the Agent is set to suspend.
+   from an authentication failure, and `start` warns when the Agent is set to suspend.
 6. **Acceptance** from a phone hotspot, including a forced relay, a network drop, and an
    Agent reboot.
 
 **Completion rule.** With the Client on a phone hotspot and the Agent at home running only
-`borrow serve`, `run`, `attach`, and `sync` work and say which path they used.
+`slingshot start`, `run`, `attach`, and `sync` work and say which path they used.
 
 ## Phase 5: Polish
 
@@ -1082,7 +1082,7 @@ and all of it is the difference between a repo and a project.
 * Cross compiled static binaries for macOS on arm64 and x86, and Linux on x86 and arm.
 * A `curl | sh` installer that picks the right binary and sets up the systemd unit.
 * An AUR package and a Homebrew tap.
-* `borrow doctor`, one command that diagnoses a broken setup and names each fix. This is
+* `slingshot doctor`, one command that diagnoses a broken setup and names each fix. This is
   the single highest value thing you can give a stranger whose install did not work.
 * A README with the pitch, a five minute quickstart, and an honest security section that
   states plainly that relays carry an encrypted stream and cannot read your code.
@@ -1090,7 +1090,7 @@ and all of it is the difference between a repo and a project.
 * CI building and testing on both platforms, and releasing binaries on tag.
 
 **Done when:** someone who has never seen the repo goes from `curl | sh` to a working
-`borrow run` in under five minutes, without asking anyone anything.
+`slingshot run` in under five minutes, without asking anyone anything.
 
 **Test this for real.** Wipe a VM, follow your own README, and time it. Every question you
 have to answer by hand is a bug in the setup.
@@ -1124,8 +1124,8 @@ Naming these honestly is more useful than pretending they are solved.
 4. **Splitting the crate too early.** Four crates on day one means four manifests and a set
    of visibility puzzles standing between you and your first working command.
 5. **Setup friction, which is the public release risk.** The tool can be excellent and still
-   fail if a stranger cannot get from `curl | sh` to a working `borrow run` in five minutes.
-   `serve` and `link` are the product for everyone who is not the author, and every failed
+   fail if a stranger cannot get from `curl | sh` to a working `slingshot run` in five minutes.
+   `start` and `link` are the product for everyone who is not the author, and every failed
    preflight check must print the exact command that fixes it.
 
 ## Which files each phase touches
@@ -1145,7 +1145,7 @@ Naming these honestly is more useful than pretending they are solved.
 # 4. Setup and Operations Reference
 
 This section records what was done by hand to get a working Client and Agent pair, and just
-as importantly, **what borrow should do instead** for someone who is not the author.
+as importantly, **what slingshot should do instead** for someone who is not the author.
 
 The rule when adding to this section: every manual step below is either a preflight check,
 an installer line, or a bug report from a future user. Nothing here is trivia.
@@ -1167,9 +1167,9 @@ Phase 4 is.
 
 ## The ssh trust model
 
-**Since Phase 3, Borrow needs only the Client to Agent direction.** The Agent to Client trust
-below was built by hand for the Phase 2 mount and is kept here as a record. Borrow no longer
-creates it, and `borrow unlink` removes the Borrow key it once installed on the Client.
+**Since Phase 3, Slingshot needs only the Client to Agent direction.** The Agent to Client trust
+below was built by hand for the Phase 2 mount and is kept here as a record. Slingshot no longer
+creates it, and `slingshot unlink` removes the Slingshot key it once installed on the Client.
 
 There were **two independent one way trusts**, not one shared credential. Each machine keeps
 its own private key, and neither private key is ever copied anywhere.
@@ -1181,7 +1181,7 @@ its own private key, and neither private key is ever copied anywhere.
 
    ~/.ssh/id_ed25519        ── proves identity ──►  ~/.ssh/authorized_keys
    SHA256:l9+J9XXQWis...                            (holds the Mac's public key)
-   passphrase in macOS Keychain          [Phase 1: borrow run]
+   passphrase in macOS Keychain          [Phase 1: slingshot run]
 
    ~/.ssh/authorized_keys   ◄── proves identity ──  ~/.ssh/id_ed25519
    (holds archbox's public key)                     SHA256:nc0ARi2XU4d...
@@ -1196,7 +1196,7 @@ its own private key, and neither private key is ever copied anywhere.
 | Comment | `adoalagic0@gmail.com` | `ado@archbox` |
 | Passphrase | yes, held in the macOS Keychain via `UseKeychain` | yes, held in the login `ssh-agent` |
 | Works unattended | **yes**, it survives `BatchMode` | **no**, it needs an unlocked agent |
-| Used by | Phase 1 `borrow run` | Phase 2 sshfs mount |
+| Used by | Phase 1 `slingshot run` | Phase 2 sshfs mount |
 
 **The asymmetry is deliberate and load bearing.** The Client to Agent direction has to work
 with no human present, which is exactly why the Keychain matters. The Agent to Client
@@ -1267,7 +1267,7 @@ ssh-copy-id archbox
 ssh archbox                                        # accept the host key once
 ```
 
-Remote Login on the Client was needed only for the Phase 2 mount. Borrow no longer needs it.
+Remote Login on the Client was needed only for the Phase 2 mount. Slingshot no longer needs it.
 The Agent now needs `rsync`, and `tmux` for sessions, rather than `sshfs`.
 
 ### A discrepancy worth knowing about
@@ -1294,7 +1294,7 @@ CSS, all of which let the later value win.
 ssh -o BatchMode=yes archbox 'echo ok'
 ```
 
-`BatchMode=yes` is the entire point. It fails if anything at all would prompt. `borrow run`
+`BatchMode=yes` is the entire point. It fails if anything at all would prompt. `slingshot run`
 can never stop to ask a human for a passphrase, so this, and not "a key file exists", is
 what `link` must check before it declares success.
 
@@ -1309,7 +1309,7 @@ what `link` must check before it declares success.
 5. Verify with `ssh -o BatchMode=yes archbox 'echo ok'`.
 
 Step 3 is exactly the chicken and egg problem that the **pairing code** exists to solve.
-`borrow link` should carry a short lived token so that a new Client can install its key
+`slingshot link` should carry a short lived token so that a new Client can install its key
 without ever loosening the Agent's ssh configuration.
 
 ## Keeping the Agent reachable while away
@@ -1335,7 +1335,7 @@ The preflight to run before leaving the house:
 ssh -o BatchMode=yes archbox 'uptime; echo READY'
 ```
 
-### This is the hardest job `borrow doctor` has
+### This is the hardest job `slingshot doctor` has
 
 Every single failure above looks identical from the Client's point of view. It looks like a
 hang. The error message has to tell them apart, because each one has a completely different
@@ -1354,7 +1354,7 @@ fix.
 `sshd -T` prints what sshd actually resolved, rather than what the file says, and that is
 what caught the real discrepancy described above.
 
-Steal the idea. When a project `borrow.toml` and the global configuration disagree, **print
+Steal the idea. When a project `slingshot.toml` and the global configuration disagree, **print
 which one won.** It is cheap to implement and it kills the entire "I changed it and nothing
 happened" category of confusion.
 
@@ -1370,9 +1370,9 @@ experience failure caught before any user experienced it.
 authentication **with no error printed anywhere.** That cost a full debugging cycle for a
 technical user who was following correct instructions.
 
-* **`borrow link` must never ask a human to paste a key.** Read the local public key, append
+* **`slingshot link` must never ask a human to paste a key.** Read the local public key, append
   it over the wire, and verify by logging in. This is what `ssh-copy-id` already does.
-* **`borrow doctor` should validate `authorized_keys` structurally:** three space separated
+* **`slingshot doctor` should validate `authorized_keys` structurally:** three space separated
   fields, base64 that actually decodes, one key per line. That is about ten lines of Rust
   and it saves that entire cycle.
 
@@ -1395,21 +1395,21 @@ It lives in the `inetutils` package, and is not part of a base installation.
 Running `ssh-copy-id` and then `> authorized_keys` produces an empty file. This was only
 recoverable because password authentication was still enabled at the time.
 
-* **`borrow link` must be idempotent and recoverable.** Users run it twice, out of order,
+* **`slingshot link` must be idempotent and recoverable.** Users run it twice, out of order,
   and halfway through. Never remove the fallback path before the new one has been verified.
 
-## What borrow automates: the contract
+## What slingshot automates: the contract
 
-This table is the specification for `serve`, `link`, and `doctor`. The left column is what a
+This table is the specification for `start`, `link`, and `doctor`. The left column is what a
 human had to do. The right column is what the tool must do instead.
 
 | Manual step | What the tool does |
 | --- | --- |
 | Generate an ssh key | `link` generates one if missing, **and says so, and says where** |
 | Install the key on the Agent | `link` does it over the wire. Never a paste. |
-| Write the `~/.ssh/config` entry | `link` stores the options in Borrow's own config instead |
-| Make sure sshd is running | `serve` checks, then prints `✗ sshd not running → sudo systemctl enable --now sshd` |
-| Make sure `rsync` and `tmux` are present | `serve` checks and prints the install line for that machine. `link` warns when the Client lacks rsync. **Never auto installs.** |
+| Write the `~/.ssh/config` entry | `link` stores the options in Slingshot's own config instead |
+| Make sure sshd is running | `start` checks, then prints `✗ sshd not running → sudo systemctl enable --now sshd` |
+| Make sure `rsync` and `tmux` are present | `start` checks and prints the install line for that machine. `link` warns when the Client lacks rsync. **Never auto installs.** |
 | Turn on Remote Login on the Client | No longer needed |
 | Pick a hostname or display name | Chosen at pairing and stored in config, never read from the machine |
 | Harden sshd | `doctor` warns if password authentication is still enabled |
@@ -1433,7 +1433,7 @@ These came out of the manual setup and are not yet decided.
    Currently leaning towards host, port, and a short lived single use token, which is
    exchanged for installing a named public key.
 
-3. **Should there be a `borrow config --effective`?**
+3. **Should there be a `slingshot config --effective`?**
    `sshd -T` prints what sshd actually resolved rather than what the file says. When the CLI
    and the daemon disagree about an exclusion or an artifact split, the same idea would end
    a whole category of confused debugging.
@@ -1445,7 +1445,7 @@ Two properties of the specific Agent machine have real design consequences.
 * **There is no swap.** `Swap: 0B`. Heavy builds hit OOM and get killed outright rather than
   gradually slowing down. This is why runs and new sessions warn at 90 percent RAM use.
 * **The GPU is never fully free.** GNOME, Xwayland, and a browser hold roughly 500 MB of the
-  8 GB at idle. `borrow info` must therefore report **available** VRAM, not total. Always
+  8 GB at idle. `slingshot info` must therefore report **available** VRAM, not total. Always
   report the number that would make somebody cancel a job.
 
 ---
@@ -1478,14 +1478,14 @@ Nothing here is checked off yet beyond what section 3 records as complete.
 * Copy eligible project source to the box, and pull edits back safely. *(P3)*
 * Artifact split: source copy and build output in separate Agent storage. *(P2)*
 * Zero configuration stack detection for Rust, Node, and Python picks the right split. *(P2)*
-* Per project `borrow.toml` exclusions *(P3)* and split overrides. *(planned)*
+* Per project `slingshot.toml` exclusions *(P3)* and split overrides. *(planned)*
 * Environment files kept outside source. *(P3)*
 
 **Sessions and control**
 
 * `attach` drops you into the project on the box. *(P3)*
 * Warm sessions survive sleep and network changes, and reconnecting lands you mid task. *(P3)*
-* `ps` and `stop` to see and manage Borrow runs and sessions. *(P3)*
+* `ps` and `stop` to see and manage Slingshot runs and sessions. *(P3)*
 
 **Visibility, seeing the box from the Client**
 
@@ -1520,18 +1520,18 @@ Nothing here is checked off yet beyond what section 3 records as complete.
 
 **Shipping it, which is what makes this a project rather than a script**
 
-* Preflight checks in `serve` and `link` that name the fix. *(P1)*
-* `borrow unlink`, clean removal of the installed key. *(P1)*
+* Preflight checks in `start` and `link` that name the fix. *(P1)*
+* `slingshot unlink`, clean removal of the installed key. *(P1)*
 * Static binaries for macOS on arm64 and x86, and Linux on x86 and arm. *(P7)*
 * A one line installer plus a systemd unit for the agent. *(P7)*
 * An AUR package and a Homebrew tap. *(P7)*
 * A README with a five minute quickstart and an honest security section. *(P7)*
 * LICENSE, CONTRIBUTING, and issue templates. *(P7)*
-* `borrow doctor`, one command that diagnoses a broken setup. *(P7)*
+* `slingshot doctor`, one command that diagnoses a broken setup. *(P7)*
 
 ## Rust skills, in the order you will need them
 
-**Foundations, Phase 1.** Ownership, borrowing, and lifetimes. `Result` and `Option` with
+**Foundations, Phase 1.** Ownership, slingshoting, and lifetimes. `Result` and `Option` with
 the `?` operator. Structs, enums, traits, and `match`. `std::process::Command` and
 `tokio::process::Command` for streaming output. `serde` with `toml` and `serde_json`.
 
@@ -1541,7 +1541,7 @@ the `?` operator. Structs, enums, traits, and `match`. `std::process::Command` a
 **Networking, Phase 4.** The `iroh` endpoint API: endpoints, public key addresses, ALPN,
 and bidirectional streams. The concepts underneath: NAT, relays, QUIC, and hole punching.
 
-**An honest note.** The wall is async and tokio, not the basics. `borrow run` is the ideal
+**An honest note.** The wall is async and tokio, not the basics. `slingshot run` is the ideal
 place to hit that wall. Streaming two output pipes while watching for Ctrl-C is genuinely a
 `select!` problem. It is small enough not to drown in, and it is the exact pattern that gets
 reused everywhere later.
@@ -1562,7 +1562,7 @@ reused everywhere later.
 2. Measure sync time and build time for real Rust, Node, and Python projects.
 3. Close the Client mid build, sleep, reconnect, and reattach.
 4. Test Agent reboot recovery, file watchers in sessions, and multiple Clients.
-5. Apply split overrides from `borrow.toml`.
+5. Apply split overrides from `slingshot.toml`.
 6. Finish Phase 4, then accept it from a phone hotspot.
 
 ## Conventions

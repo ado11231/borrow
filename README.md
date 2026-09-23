@@ -1,20 +1,20 @@
-# Borrow
+# Slingshot
 
 ## How to run
 
 Use two computers on the same network with Rust installed on both. The Agent needs an SSH server, rsync, and tmux. The Client needs rsync.
 
-From the Borrow repository on each computer:
+From the Slingshot repository on each computer:
 
 ```sh
 cargo build
 export PATH="$PWD/target/debug:$PATH"
 ```
 
-Start Borrow on the Agent:
+Start Slingshot on the Agent:
 
 ```sh
-borrow serve
+slingshot start
 ```
 
 Follow any setup instructions it prints. Keep it running.
@@ -22,30 +22,30 @@ Follow any setup instructions it prints. Keep it running.
 On the Client, use the pairing code printed by the Agent:
 
 ```sh
-borrow link <code>
+slingshot link <code>
 ```
 
 Then open your project folder and run:
 
 ```sh
-borrow run cargo build
+slingshot run cargo build
 ```
 
 ## Commands
 
-1. `borrow serve` starts the Agent.
-2. `borrow link <code>` pairs the computers.
-3. `borrow run <command>` copies project changes to the Agent, then runs the command there.
-4. `borrow attach` opens or rejoins a persistent session for the project.
-5. `borrow sync` copies project changes to the Agent. Its pull option retrieves Agent edits, and its check option previews without changing anything.
-6. `borrow env add`, `borrow env list`, and `borrow env remove` manage environment files kept on the Agent.
-7. `borrow ps` lists runs and sessions.
-8. `borrow stop <id>` stops a run or session.
-9. `borrow info` shows machine specifications.
-10. `borrow health` shows current resource use. Its watch option keeps it updating.
-11. `borrow top` shows live resource use with active jobs.
-12. `borrow unlink` removes the pairing.
-13. `borrow help <command>` shows every option.
+1. `slingshot start` starts the Agent.
+2. `slingshot link <code>` pairs the computers.
+3. `slingshot run <command>` copies project changes to the Agent, then runs the command there.
+4. `slingshot attach` opens or rejoins a persistent session for the project.
+5. `slingshot sync` copies project changes to the Agent. Its pull option retrieves Agent edits, and its check option previews without changing anything.
+6. `slingshot env add`, `slingshot env list`, and `slingshot env remove` manage environment files kept on the Agent.
+7. `slingshot ps` lists runs and sessions.
+8. `slingshot stop <id>` stops a run or session.
+9. `slingshot info` shows machine specifications.
+10. `slingshot health` shows current resource use. Its watch option keeps it updating.
+11. `slingshot top` shows live resource use with active jobs.
+12. `slingshot unlink` removes the pairing.
+13. `slingshot help <command>` shows every option.
 
 ## Phases
 
@@ -61,5 +61,5 @@ borrow run cargo build
 
 ## Known gaps
 
-1. `borrow.toml` reads `sync.exclude` only. Split overrides are not applied yet.
+1. `slingshot.toml` reads `sync.exclude` only. Split overrides are not applied yet.
 2. File watchers in sessions, several Clients on one Agent, and large Node and Python projects are untested.

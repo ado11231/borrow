@@ -13,21 +13,22 @@ wins and this file needs fixing.
 
 ## What this project is
 
-**borrow** lets a light machine use the RAM, CPU, and GPU of a heavy machine, without
+**slingshot** lets a light machine use the RAM, CPU, and GPU of a heavy machine, without
 leaving the light machine.
 
 The user stays in their normal environment, meaning their editor, terminal, and browser,
 but the heavy parts of development run somewhere else. Builds, servers, databases,
 containers, coding agents, and small AI models all go to the powerful box. Heavy work never
 touches the light machine. Files are edited on the light machine, and the powerful machine
-works on a filtered copy that borrow keeps in step. It has to feel local. **No VM, and no
+works on a filtered copy that slingshot keeps in step. It has to feel local. **No VM, and no
 remote desktop.**
 
 * **Goal:** a public open source tool that anyone can install and set up in minutes. This is
-  not a personal script that happens to be on GitHub. `serve` and `link` are the product for
+  not a personal script that happens to be on GitHub. `start` and `link` are the product for
   every user who is not the author. Setup friction is a bug, not something to explain away
   in documentation.
-* **Working name:** `borrow`. It may change.
+* **Name:** Slingshot, and the command is `slingshot`. It was called borrow until
+  September 22, 2026.
 * **Language:** Rust.
 * **Two roles:** the **Client** is the machine you work from. The **Agent** is the machine
   with the resources. Across networks the two meet through **iroh**, which we wrap rather
@@ -96,13 +97,13 @@ pairing, job records, health, sessions, sync leases, and reachability. **ssh is 
 plane**, so `run`, `attach`, and rsync shell out to it. Do not write a custom execution
 channel. The user never types an ssh command and never edits `~/.ssh/config`.
 
-After pairing, every structured request goes through a hidden `borrow internal-control`
+After pairing, every structured request goes through a hidden `slingshot internal-control`
 helper started over ssh, which relays to a private Agent Unix socket. The TCP port only
 pairs. Never add creation, stop, or data operations to the TCP endpoint.
 
 **Security, built in from Phase 1 and never retrofitted.** Pairing codes are short lived and
 single use. The daemon binds to loopback plus the LAN, never `0.0.0.0`. Installed keys are
-named so they can be revoked. `borrow unlink` works. Remote arguments are always quoted and
+named so they can be revoked. `slingshot unlink` works. Remote arguments are always quoted and
 never concatenated into a shell. Control messages carry a version, a size limit, and
 timeouts. The Agent OS account is the trust boundary. Never signal a process by PID alone;
 match its start time too. The Agent accepts iroh connections only from Clients it paired
@@ -127,18 +128,18 @@ no longer used for execution. Full detail is in `docs/GUIDE.md`.
 
 ```
 crates/
-├── borrow-core/     lib: config, control, protocol, source, sync, storage, artifacts,
+├── slingshot-core/     lib: config, control, protocol, source, sync, storage, artifacts,
 │                    stack, telemetry, preflight, presentation, keys
-├── borrow-agent/    lib: pairing daemon, service, projects, jobs, runner
-└── borrow-cli/      bin `borrow`: client, transfer, project, live, ssh, keys, commands/
+├── slingshot-agent/    lib: pairing daemon, service, projects, jobs, runner
+└── slingshot-cli/      bin `slingshot`: client, transfer, project, live, ssh, keys, commands/
 ```
 
-**Three crates, one binary.** `borrow-core` and `borrow-agent` are libraries; `borrow-cli`
-produces the only executable, named `borrow` via `[[bin]]`. The point of the split is the
+**Three crates, one binary.** `slingshot-core` and `slingshot-agent` are libraries; `slingshot-cli`
+produces the only executable, named `slingshot` via `[[bin]]`. The point of the split is the
 crate boundary, which makes the compiler refuse a cycle, not separate executables. Splitting
 those is a Phase 7 distribution decision.
 
-Dependencies point one way only: `borrow-cli` uses both, `borrow-agent` uses core, and core
+Dependencies point one way only: `slingshot-cli` uses both, `slingshot-agent` uses core, and core
 uses nothing of ours. If either side ever needs something from the other, the thing belongs
 in core instead. That is how `keys::marker`, `keys::client_name`, `storage::short_id`,
 `sync::merge`, and `source::environment_target` ended up there: each is a rule both machines
@@ -147,40 +148,40 @@ have to apply the same way.
 **End state, from Phase 2 onward:**
 
 ```
-borrow/
+slingshot/
 ├── crates/
-│   ├── borrow-core/        # shared: protocol, config, source, sync, stack detect, telemetry, error
-│   ├── borrow-cli/         # the borrow command, on the Client
-│   └── borrow-agent/       # the Linux daemon, a systemd service
+│   ├── slingshot-core/        # shared: protocol, config, source, sync, stack detect, telemetry, error
+│   ├── slingshot-cli/         # the slingshot command, on the Client
+│   └── slingshot-agent/       # the Linux daemon, a systemd service
 ├── deploy/                 # systemd unit and installer
 ├── mac/menubar/            # Mac only menu bar and notifications, Phase 5
 └── docs/
 ```
 
 Shared types, especially the wire **protocol**, **source eligibility**, **sync**, and the
-**artifact split** logic, live in `borrow-core` and are used by every binary. Define them once.
+**artifact split** logic, live in `slingshot-core` and are used by every binary. Define them once.
 
 ---
 
 ## Commands, the target user experience
 
 ```bash
-borrow serve            # Agent: start the daemon, print a pairing code
-borrow link <code>      # Client: connect and remember the box
-borrow run <cmd>        # sync the project, run on the box, stream output back
-borrow attach [path]    # create or rejoin the project's tmux session on the box
-borrow sync [path]      # push changes; --pull retrieves, --check previews
-borrow env add|list|remove   # environment files kept outside source
-borrow ps [--all]       # Borrow runs and sessions, with recent history
-borrow stop <id>        # graceful stop, then kill after five seconds
-borrow info             # static specs of the box, cached
-borrow health           # live snapshot; --watch refreshes every two seconds
-borrow top              # live resources and active jobs
+slingshot start            # Agent: start the daemon, print a pairing code
+slingshot link <code>      # Client: connect and remember the box
+slingshot run <cmd>        # sync the project, run on the box, stream output back
+slingshot attach [path]    # create or rejoin the project's tmux session on the box
+slingshot sync [path]      # push changes; --pull retrieves, --check previews
+slingshot env add|list|remove   # environment files kept outside source
+slingshot ps [--all]       # Slingshot runs and sessions, with recent history
+slingshot stop <id>        # graceful stop, then kill after five seconds
+slingshot info             # static specs of the box, cached
+slingshot health           # live snapshot; --watch refreshes every two seconds
+slingshot top              # live resources and active jobs
 ```
 
 Common stacks, meaning Rust, Node, and Python, must work with **zero configuration** by
 detecting `Cargo.toml`, `package.json`, and similar, then applying the right artifact split
-automatically. A small `borrow.toml` can add `sync.exclude` patterns. Split overrides are
+automatically. A small `slingshot.toml` can add `sync.exclude` patterns. Split overrides are
 planned.
 
 ---
@@ -195,7 +196,7 @@ planned.
 5. **Phase 5.** Menu bar with live readout, notifications, automatic port forwarding.
 6. **Phase 6.** Wrap Ollama and ComfyUI, pairing across networks, self hosted relays, Linux
    to Linux hardening.
-7. **Phase 7.** Ship it: static binaries, installer, packages, `borrow doctor`, README.
+7. **Phase 7.** Ship it: static binaries, installer, packages, `slingshot doctor`, README.
 
 Each phase must leave a working, usable tool. Phase 4 gates publishing, because before it
 "works from anywhere" means "set up a VPN first". Full detail is in `docs/GUIDE.md`.
@@ -207,29 +208,32 @@ Each phase must leave a working, usable tool. Phase 4 gates publishing, because 
 **Phases 1 and 3 are complete. Phase 4 is in acceptance testing.** Phase 3 replaced Phase 2's SSHFS execution with filtered
 source copies and kept its stack detection and artifact split.
 
-Pairing creates only Client to Agent SSH trust and records the Agent's Borrow path.
-`borrow unlink` removes the installed key, this Client's environment files, and the learned
+The rename from borrow to Slingshot changed folders, the ssh key name, and the iroh protocol
+name with no migration, so both machines must run `slingshot link` again after updating.
+
+Pairing creates only Client to Agent SSH trust and records the Agent's Slingshot path.
+`slingshot unlink` removes the installed key, this Client's environment files, and the learned
 host keys, keeping source copies and backups.
 
 **The Phase 2 mount surface is gone.** Its fields were deleted from config and from the
 pairing message, so a config file written before that no longer loads and the machines must
-run `borrow link` again. The control protocol is at version 5, raised when unlink began
+run `slingshot link` again. The control protocol is at version 5, raised when unlink began
 naming the Client so the Agent can forget its iroh key.
 
-CLI output uses shared formatting in `borrow-core/src/presentation.rs`. Messages use
+CLI output uses shared formatting in `slingshot-core/src/presentation.rs`. Messages use
 sentence capitalization. CPU, RAM, GPU, and VRAM labels use uppercase. Colors have text
 labels and respect terminal detection. Global `--color auto|always|never` controls
-Borrow output. Put Borrow options before `run`; later arguments belong to the remote
+Slingshot output. Put Slingshot options before `run`; later arguments belong to the remote
 command.
 
 The current suite contains 179 passing tests, and formatting and Clippy pass. The Phase 3
 flows were accepted on a real Mac Client and Arch Linux Agent, including a network drop
 mid build, a daemon restart, and an Agent reboot. Phase 4 was checked on the same two
 machines: `run` via the local network, the tailnet, and iroh from a phone hotspot, the
-failure message with `serve` stopped, and the awake lock.
+failure message with `start` stopped, and the awake lock.
 
 **Not yet true, do not claim otherwise.** File watchers inside sessions, several Clients
-sharing one Agent account, and large Node and Python projects are untested. `borrow.toml`
+sharing one Agent account, and large Node and Python projects are untested. `slingshot.toml`
 split overrides are parsed but never applied; only `sync.exclude` is read. The Phase 3
 flows, meaning sync, attach, a network drop, and a reboot, have not been re-run over iroh.
 Pairing across networks does not exist.
@@ -239,7 +243,7 @@ The detailed file reference and completion record live in `docs/PROJECT_STATUS.m
 ## Conventions
 
 * **Errors.** The current crates use `anyhow`. Typed shared errors remain a future improvement. A non zero remote exit
-  code is not an error. borrow did its job and the command it ran happened to fail.
+  code is not an error. slingshot did its job and the command it ran happened to fail.
 * **Async.** `tokio`. The tool is concurrent by nature, handling connections, streaming, and
   watching processes, so expect async everywhere past Phase 1.
 * **Config and wire messages.** `serde`, with `toml` and `serde_json`.
