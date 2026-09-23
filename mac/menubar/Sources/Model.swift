@@ -1,0 +1,92 @@
+import Foundation
+
+/// The line format version this app understands. Matches `watch::event::VERSION` in Rust.
+let supportedVersion = 1
+
+enum Level: String, Decodable {
+    case good, warning, high
+}
+
+struct Percent: Decodable {
+    let percent: Double
+    let level: Level
+}
+
+struct Usage: Decodable {
+    let usedMib: UInt64
+    let totalMib: UInt64
+    let level: Level
+
+    var fraction: Double { totalMib == 0 ? 0 : Double(usedMib) / Double(totalMib) }
+}
+
+struct Space: Decodable {
+    let freeMib: UInt64
+    let level: Level
+}
+
+struct Gpu: Decodable {
+    let name: String
+    let utilization: Percent?
+    let temperatureC: UInt32?
+    let temperatureLevel: Level?
+    let vram: Usage?
+}
+
+struct Status: Decodable {
+    let agent: String
+    let online: Bool
+    let path: String?
+    let error: String?
+    let cpu: Percent?
+    let memory: Usage?
+    let workspace: Space?
+    let gpus: [Gpu]
+    let gpuProblem: String?
+}
+
+struct Notice: Decodable {
+    let kind: String
+    let title: String
+    let body: String
+}
+
+enum Event {
+    case status(Status)
+    case notice(Notice)
+    case unsupported(Int)
+}
+
+private struct Header: Decodable {
+    let version: Int
+    let event: String
+}
+
+private let decoder: JSONDecoder = {
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    return decoder
+}()
+
+/// One line from the helper. Lines this version does not understand are skipped.
+func decodeEvent(_ line: Data) -> Event? {
+    guard let header = try? decoder.decode(Header.self, from: line) else { return nil }
+    guard header.version == supportedVersion else { return .unsupported(header.version) }
+    switch header.event {
+    case "status": return (try? decoder.decode(Status.self, from: line)).map(Event.status)
+    case "notice": return (try? decoder.decode(Notice.self, from: line)).map(Event.notice)
+    default: return nil
+    }
+}
+
+/// `18.0 GiB` or `512 MiB`, matching how the command line prints sizes.
+func capacity(_ mib: UInt64) -> String {
+    mib >= 1024 ? String(format: "%.1f GiB", Double(mib) / 1024) : "\(mib) MiB"
+}
+
+/// `12/32G`, short enough for the menu bar.
+func shortCapacity(_ usage: Usage) -> String {
+    let used = Double(usage.usedMib) / 1024
+    let total = Double(usage.totalMib) / 1024
+    return String(format: "%.0f/%.0fG", used, total)
+}
