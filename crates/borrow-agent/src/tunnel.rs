@@ -11,7 +11,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// The Agent's own sshd. Borrow already requires it on the usual port.
 pub const SSHD: SocketAddr = SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST), 22);
@@ -51,7 +51,9 @@ pub async fn accept(endpoint: Endpoint, root: PathBuf, sshd: SocketAddr) {
     }
 }
 
-/// Refuse keys that never paired, then join every stream the Client opens to sshd.
+/// Refuse keys that never paired, then join every stream the Client opens to sshd. ssh ends
+/// its ProxyCommand without closing the connection, so a stream that stops abruptly is how
+/// a finished command normally looks from here.
 async fn handle(incoming: Incoming, root: PathBuf, sshd: SocketAddr) -> anyhow::Result<()> {
     let connection = incoming.await.context("iroh handshake failed")?;
     let client = connection.remote_id();
@@ -62,18 +64,20 @@ async fn handle(incoming: Incoming, root: PathBuf, sshd: SocketAddr) -> anyhow::
     info!("iroh connection from {}", client.fmt_short());
     while let Ok((send, recv)) = connection.accept_bi().await {
         tokio::spawn(async move {
-            if let Err(e) = splice(send, recv, sshd).await {
-                warn!("iroh stream to sshd ended: {e:#}");
+            match TcpStream::connect(sshd).await {
+                Ok(server) => {
+                    if let Err(e) = splice(send, recv, server).await {
+                        debug!("iroh stream to sshd ended: {e:#}");
+                    }
+                }
+                Err(e) => warn!("Could not reach sshd at {sshd}: {e}"),
             }
         });
     }
     Ok(())
 }
 
-async fn splice(send: SendStream, recv: RecvStream, sshd: SocketAddr) -> anyhow::Result<()> {
-    let mut server = TcpStream::connect(sshd)
-        .await
-        .with_context(|| format!("Could not reach sshd at {sshd}"))?;
+async fn splice(send: SendStream, recv: RecvStream, mut server: TcpStream) -> anyhow::Result<()> {
     let mut stream = tokio::io::join(recv, send);
     tokio::io::copy_bidirectional(&mut stream, &mut server).await?;
     Ok(())

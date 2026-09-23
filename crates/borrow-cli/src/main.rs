@@ -170,6 +170,10 @@ enum EnvAction {
     Remove { target: String },
 }
 
+/// Borrow's own warnings show by default. Libraries such as iroh only show real errors,
+/// because their internals mean nothing to the person running a command.
+const DEFAULT_LOG: &str = "error,borrow_cli=warn,borrow_agent=warn,borrow_core=warn";
+
 /// Pass through command exit codes. Borrow failures exit with code 1.
 #[tokio::main]
 async fn main() {
@@ -179,7 +183,7 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_env("BORROW_LOG")
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(DEFAULT_LOG)),
         )
         .with_writer(std::io::stderr)
         .with_ansi(mode.enabled(
