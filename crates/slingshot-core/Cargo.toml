@@ -8,6 +8,7 @@ anyhow = { workspace = true }
 iroh = { workspace = true }
 directories = { workspace = true }
 ignore = { workspace = true }
+indicatif = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -256,8 +256,6 @@ mod tests {
     fn swap_notice_is_a_readable_warning() {
         let mut health = sample();
         health.swap_total_mib = 0;
-        assert!(
-            render("archbox", &health, Style::new(false)).contains("Warning: No swap configured.")
-        );
+        assert!(render("archbox", &health, Style::new(false)).contains("! No swap configured."));
     }
 }

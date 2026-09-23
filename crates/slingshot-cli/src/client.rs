@@ -156,7 +156,12 @@ impl Control {
         let text = String::from_utf8_lossy(&errors);
         let detail = text
             .lines()
-            .map(|line| line.trim().trim_start_matches("Error:").trim())
+            .map(|line| {
+                line.trim()
+                    .trim_start_matches(['✗'])
+                    .trim_start_matches("Error:")
+                    .trim()
+            })
             .rfind(|line| !line.is_empty())
             .unwrap_or("the SSH connection closed");
         let hint = match detail {

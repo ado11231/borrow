@@ -71,6 +71,17 @@ impl Style {
         format!("\x1b[{code}m{text}\x1b[0m")
     }
 
+    pub fn colored(self) -> bool {
+        self.color
+    }
+
+    pub fn dim(self, text: impl std::fmt::Display) -> String {
+        match self.color {
+            true => format!("\x1b[2m{text}\x1b[0m"),
+            false => text.to_string(),
+        }
+    }
+
     pub fn heading(self, text: impl std::fmt::Display) -> String {
         self.paint(text, Tone::Info)
     }
@@ -78,8 +89,8 @@ impl Style {
     pub fn status(self, text: impl std::fmt::Display, tone: Tone) -> String {
         let label = match tone {
             Tone::Good => "✓",
-            Tone::Warning => "Warning:",
-            Tone::Error => "Error:",
+            Tone::Warning => "!",
+            Tone::Error => "✗",
             Tone::Info => "▶",
         };
         format!("{} {text}", self.paint(label, tone))
@@ -164,7 +175,7 @@ mod tests {
     fn plain_status_remains_readable_without_color() {
         assert_eq!(
             Style::new(false).status("Low memory", Tone::Warning),
-            "Warning: Low memory"
+            "! Low memory"
         );
         assert_eq!(
             Style::new(true).paint("Busy", Tone::Warning),

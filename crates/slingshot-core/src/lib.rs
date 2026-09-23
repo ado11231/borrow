@@ -10,6 +10,7 @@ pub mod presentation;
 pub mod protocol;
 pub mod source;
 pub mod stack;
+pub mod step;
 pub mod storage;
 pub mod sync;
 pub mod telemetry;
