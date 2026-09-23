@@ -36,6 +36,9 @@ enum Metric {
 /// gets its own color.
 let vramColor = Color.pink
 
+/// Every value beside a bar uses this, so all the numbers match.
+let valueFont = Font.system(size: 12, weight: .bold, design: .rounded).monospacedDigit()
+
 /// Healthy values stay plain, as on the command line. Color is for what needs attention.
 func valueColor(_ level: Level?) -> Color {
     switch level {
@@ -294,10 +297,10 @@ struct MetricSection<Content: View>: View {
                 HStack(spacing: 3) {
                     if let valueIcon {
                         Image(systemName: valueIcon)
-                            .font(.caption)
+                            .font(.system(size: 10, weight: .bold))
                     }
                     Text(value)
-                        .font(.system(.callout, design: .rounded).monospacedDigit())
+                        .font(valueFont)
                 }
                 .foregroundStyle(valueColor(level))
                 .layoutPriority(1)
@@ -332,7 +335,7 @@ struct PartRow: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text(value)
-                    .font(.caption.monospacedDigit())
+                    .font(valueFont)
                     .foregroundStyle(valueColor(level))
             }
             UsageBar(fraction: fraction, color: color)
