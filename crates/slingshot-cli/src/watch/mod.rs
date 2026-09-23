@@ -1,6 +1,7 @@
 //! `slingshot internal-watch`: keeps one control connection to the box and prints what the
 //! menu bar app shows and notifies, one JSON line at a time. The app starts it and closes
-//! its input to stop it, so it never outlives the app.
+//! its input to stop it, so it never outlives the app. A `retry` line on its input skips the
+//! wait before the next attempt, for the app's Try again button.
 
 pub mod event;
 pub mod state;
@@ -12,8 +13,10 @@ use slingshot_core::config::Config;
 use slingshot_core::control::{Request, Response};
 use state::Watch;
 use std::convert::Infallible;
-use std::io::Write;
+use std::io::{BufRead, Write};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Notify;
 
 /// How often the popover's numbers move.
 const HEALTH_EVERY: Duration = Duration::from_secs(2);
@@ -32,8 +35,16 @@ const BACKOFF: [Duration; 4] = [
 ];
 
 pub async fn run(agent: Option<String>) -> anyhow::Result<i32> {
-    std::thread::spawn(|| {
-        let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+    let retry = Arc::new(Notify::new());
+    let asked = retry.clone();
+    std::thread::spawn(move || {
+        for line in std::io::stdin().lock().lines() {
+            match line {
+                Ok(line) if line.trim() == "retry" => asked.notify_one(),
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
         std::process::exit(0);
     });
 
@@ -61,7 +72,10 @@ pub async fn run(agent: Option<String>) -> anyhow::Result<i32> {
         };
         route::forget();
         let wait = BACKOFF[(failures as usize).saturating_sub(1).min(BACKOFF.len() - 1)];
-        tokio::time::sleep(wait).await;
+        tokio::select! {
+            () = tokio::time::sleep(wait) => {}
+            () = retry.notified() => {}
+        }
     }
 }
 
