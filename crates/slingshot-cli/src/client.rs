@@ -8,6 +8,7 @@ use anyhow::Context;
 use slingshot_core::config::Agent;
 use slingshot_core::control::{self, Request, Response};
 use slingshot_core::protocol;
+use slingshot_core::step::{self, Step};
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -184,6 +185,19 @@ impl Control {
         drop(input);
         let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
     }
+}
+
+/// Shown until the first answer arrives, which is when ssh has actually connected.
+pub fn connecting(agent: &Agent) -> Step {
+    step::start(format!("Connecting to {}", agent.name))
+}
+
+pub fn connected(step: Step, agent: &Agent) {
+    step.done(format!(
+        "Connected to {} via {}",
+        agent.name,
+        route::resolve(agent).name()
+    ));
 }
 
 /// Open a connection, send one request, and close it.

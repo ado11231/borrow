@@ -4,7 +4,7 @@
 //! only the changed regular files into staging over SSH, and the receiving side checks
 //! every staged file before applying anything.
 
-use crate::client::{Control, unexpected};
+use crate::client::{self, Control, unexpected};
 use crate::project::{self, Local};
 use crate::route;
 use anyhow::{Context, bail, ensure};
@@ -12,6 +12,7 @@ use slingshot_core::config::Agent;
 use slingshot_core::control::{ProjectInfo, ProjectRef, Request, Response, Snapshot};
 use slingshot_core::presentation::{self, Style, Tone};
 use slingshot_core::source::{self, Manifest, Rules};
+use slingshot_core::step::Step;
 use slingshot_core::storage;
 use slingshot_core::sync::{self, Plan, StateDir};
 use std::path::{Path, PathBuf};
@@ -31,6 +32,7 @@ pub(crate) struct ProjectSession {
 /// Connect to the Agent and make sure the project has storage there.
 pub async fn open(agent: &Agent, local: &Local) -> anyhow::Result<ProjectSession> {
     let id = project::identify(&project::client_root()?, &local.root, &agent.name)?;
+    let connecting = client::connecting(agent);
     let mut control = Control::connect(agent).await?;
     let reference = ProjectRef {
         id: id.clone(),
@@ -40,6 +42,7 @@ pub async fn open(agent: &Agent, local: &Local) -> anyhow::Result<ProjectSession
     let Response::Project(project) = control.call(Request::Open(reference)).await? else {
         return Err(unexpected());
     };
+    client::connected(connecting, agent);
     Ok(ProjectSession {
         control,
         project,
@@ -138,11 +141,12 @@ async fn release_on_error<T>(
     }
 }
 
-/// Copy Client edits to the Agent. Nothing is printed unless files move.
+/// Copy Client edits to the Agent, saying on `step` what is being copied.
 pub async fn push(
     opened: &mut ProjectSession,
     agent: &Agent,
     local: &Local,
+    step: &Step,
 ) -> anyhow::Result<SyncResult> {
     let (excludes, snapshot, token) = take_lease(opened, local, false).await?;
     let result = async {
@@ -152,7 +156,7 @@ pub async fn push(
         refuse_conflicts(&plan, &agent.name)?;
         let files = regular_files(&plan, &local_manifest);
         if !files.is_empty() {
-            presentation::progress(format!(
+            step.set(format!(
                 "Copying {} to {}",
                 presentation::plural(files.len(), "file"),
                 agent.name
@@ -183,22 +187,29 @@ pub async fn push(
     }
     .await;
     release_on_error(opened, token, &result).await;
-    let outcome = result?;
-    if outcome.changed > 0 {
-        presentation::success(format!(
-            "Synced {} to {}",
-            presentation::plural(outcome.changed, "change"),
-            agent.name
-        ));
-    }
-    Ok(outcome)
+    result
 }
 
-/// Copy Agent edits back to the Client.
+pub fn syncing(local: &Local) -> Step {
+    slingshot_core::step::start(format!("Syncing {}", local.name))
+}
+
+/// End a sync step with what changed.
+pub fn finish(step: Step, outcome: &SyncResult, direction: Direction) {
+    let changes = presentation::plural(outcome.changed, "change");
+    match (direction, outcome.changed) {
+        (_, 0) => step.done("Source up to date"),
+        (Direction::Push, _) => step.done(format!("Synced {changes}")),
+        (Direction::Pull, _) => step.done(format!("Retrieved {changes}")),
+    }
+}
+
+/// Copy Agent edits back to the Client, saying on `step` what is being copied.
 pub async fn pull(
     opened: &mut ProjectSession,
     agent: &Agent,
     local: &Local,
+    step: &Step,
 ) -> anyhow::Result<SyncResult> {
     let state_dir = state_dir(&opened.id)?;
     let state = StateDir::new(&state_dir);
@@ -224,7 +235,7 @@ pub async fn pull(
         let files = regular_files(&plan, &snapshot.manifest);
         storage::private_dir(&stage)?;
         if !files.is_empty() {
-            presentation::progress(format!(
+            step.set(format!(
                 "Copying {} from {}",
                 presentation::plural(files.len(), "file"),
                 agent.name

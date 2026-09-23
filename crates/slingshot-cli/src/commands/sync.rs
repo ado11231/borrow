@@ -20,50 +20,44 @@ pub async fn sync(
     };
 
     let mut opened = transfer::open(target, &local).await?;
-    let result = match (check, direction) {
-        (true, _) if !opened.project.initialized => {
+    let result = match check {
+        true if !opened.project.initialized => {
             presentation::progress(format!(
                 "{} has no copy on {} yet. slingshot sync will copy it",
                 local.name, target.name
             ));
             Ok(())
         }
-        (true, direction) => transfer::preview(&mut opened, target, &local, direction)
+        true => transfer::preview(&mut opened, target, &local, direction)
             .await
             .map(|_| ()),
-        (false, Direction::Push) => transfer::push(&mut opened, target, &local)
-            .await
-            .map(|outcome| report(outcome, &target.name, &local.name, Direction::Push)),
-        (false, Direction::Pull) => transfer::pull(&mut opened, target, &local)
-            .await
-            .map(|outcome| report(outcome, &target.name, &local.name, Direction::Pull)),
+        false => {
+            let step = transfer::syncing(&local);
+            let outcome = match direction {
+                Direction::Push => transfer::push(&mut opened, target, &local, &step).await,
+                Direction::Pull => transfer::pull(&mut opened, target, &local, &step).await,
+            };
+            outcome.map(|outcome| {
+                transfer::finish(step, &outcome, direction);
+                report_kept(outcome.kept, &target.name, direction);
+            })
+        }
     };
     opened.control.close().await;
     result.map(|_| 0)
 }
 
-fn report(outcome: transfer::SyncResult, agent: &str, name: &str, direction: Direction) {
-    match (direction, outcome.changed) {
-        (Direction::Push, 0) => {
-            presentation::success(format!("{agent} already has the latest source of {name}"))
-        }
-        (Direction::Pull, 0) => presentation::success(format!(
-            "This machine already has the latest source of {name}"
-        )),
-        (Direction::Push, _) => {}
-        (Direction::Pull, changed) => presentation::success(format!(
-            "Retrieved {} from {agent}",
-            presentation::plural(changed, "change")
-        )),
+/// Paths changed only on the receiving side are left alone, and worth a look.
+fn report_kept(kept: usize, agent: &str, direction: Direction) {
+    if kept == 0 {
+        return;
     }
-    if outcome.kept > 0 {
-        let (place, hint) = match direction {
-            Direction::Push => (agent.to_string(), "slingshot sync --pull --check"),
-            Direction::Pull => ("this machine".to_string(), "slingshot sync --check"),
-        };
-        presentation::progress(format!(
-            "Kept {} changed only on {place}. Review with {hint}",
-            presentation::plural(outcome.kept, "path")
-        ));
-    }
+    let (place, hint) = match direction {
+        Direction::Push => (agent, "slingshot sync --pull --check"),
+        Direction::Pull => ("this machine", "slingshot sync --check"),
+    };
+    presentation::warning(format!(
+        "Kept {} changed only on {place}. Review with {hint}",
+        presentation::plural(kept, "path")
+    ));
 }

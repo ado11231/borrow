@@ -4,11 +4,13 @@ use crate::client::{self, Refused};
 use crate::project::{self, Local};
 use crate::route;
 use crate::ssh::{Disconnected, RemoteCommand};
-use crate::transfer;
+use crate::transfer::{self, Direction};
 use slingshot_core::artifacts;
 use slingshot_core::config::{Agent, Config};
 use slingshot_core::control::{Request, Response};
-use slingshot_core::presentation::{self, Style};
+use slingshot_core::presentation::{self, Style, Tone};
+use slingshot_core::step;
+use std::time::{Duration, Instant};
 
 /// Run `cmd` on the Agent and return its exit code. A non zero code is not an
 /// error: slingshot did its job, and the command it ran happened to fail.
@@ -17,6 +19,7 @@ pub async fn run(agent: Option<String>, cmd: Vec<String>) -> anyhow::Result<i32>
         anyhow::bail!("No command given. Try slingshot run echo hello");
     }
 
+    let started = Instant::now();
     let config = Config::load()?;
     let target = config.resolve(agent.as_deref())?;
     let local = project::locate(&std::env::current_dir()?);
@@ -25,7 +28,9 @@ pub async fn run(agent: Option<String>, cmd: Vec<String>) -> anyhow::Result<i32>
     let warnings = match &local {
         Some(local) => {
             let mut opened = transfer::open(target, local).await?;
-            transfer::push(&mut opened, target, local).await?;
+            let step = transfer::syncing(local);
+            let outcome = transfer::push(&mut opened, target, local, &step).await?;
+            transfer::finish(step, &outcome, Direction::Push);
             let warnings = opened.control.call(Request::Warnings).await;
             opened.control.close().await;
             args.extend(["--project".to_string(), opened.id]);
@@ -34,24 +39,41 @@ pub async fn run(agent: Option<String>, cmd: Vec<String>) -> anyhow::Result<i32>
             }
             warnings
         }
-        None => client::request(target, Request::Warnings).await,
+        None => {
+            let connecting = client::connecting(target);
+            let warnings = client::request(target, Request::Warnings).await;
+            match warnings.is_ok() {
+                true => client::connected(connecting, target),
+                false => connecting.clear(),
+            }
+            warnings
+        }
     };
     show_warnings(warnings);
 
     args.push("--".to_string());
     args.extend(cmd);
 
+    let style = Style::stderr();
+    let path = route::resolve(target).name();
     eprintln!(
-        "{}",
-        Style::stderr().heading(announcement(
-            &target.name,
-            route::resolve(target).name(),
-            local.as_ref()
-        ))
+        "{}\n",
+        announcement(&target.name, path, local.as_ref(), style)
     );
 
     let remote = RemoteCommand::to(target, target.program().to_string(), args);
-    interact(target, &remote, lost_connection(&target.name)).await
+    let code = interact(target, &remote, lost_connection(&target.name)).await?;
+    eprintln!("\n{}", finished(code, started.elapsed(), style));
+    Ok(code)
+}
+
+/// The last line of a run: how long it took and how the command exited.
+fn finished(code: i32, took: Duration, style: Style) -> String {
+    let took = step::elapsed(took);
+    match code {
+        0 => style.status(format!("Done in {took} · exit 0"), Tone::Good),
+        code => style.status(format!("Failed in {took} · exit {code}"), Tone::Error),
+    }
 }
 
 /// Run an interactive remote command, replacing SSH's messages about a dropped connection
@@ -96,8 +118,13 @@ pub fn show_warnings(result: anyhow::Result<Response>) {
 
 /// The line printed before anything runs. Saying where the work happens is a hard
 /// requirement, including the path taken, which project folder, and what build output moved.
-fn announcement(name: &str, path: &str, local: Option<&Local>) -> String {
-    let mut line = format!("▶ Running on {name} via {path}");
+fn announcement(name: &str, path: &str, local: Option<&Local>, style: Style) -> String {
+    let mut line = format!(
+        "{} Running on {} via {}",
+        style.paint("▶", Tone::Info),
+        style.paint(name, Tone::Info),
+        style.paint(path, Tone::Info)
+    );
 
     let Some(local) = local else {
         return line;
@@ -138,7 +165,7 @@ mod tests {
     #[test]
     fn outside_a_project_it_only_says_where() {
         assert_eq!(
-            announcement("archbox", "local network", None),
+            announcement("archbox", "local network", None, Style::new(false)),
             "▶ Running on archbox via local network"
         );
     }
@@ -149,9 +176,23 @@ mod tests {
             announcement(
                 "archbox",
                 "tailnet",
-                Some(&local("crates/cli", vec![Stack::Rust]))
+                Some(&local("crates/cli", vec![Stack::Rust])),
+                Style::new(false)
             ),
             "▶ Running on archbox via tailnet · app/crates/cli · target → Agent disk"
+        );
+    }
+
+    #[test]
+    fn the_last_line_gives_the_time_and_exit_code() {
+        let plain = Style::new(false);
+        assert_eq!(
+            finished(0, Duration::from_millis(3_500), plain),
+            "✓ Done in 3.5s · exit 0"
+        );
+        assert_eq!(
+            finished(101, Duration::from_millis(1_200), plain),
+            "✗ Failed in 1.2s · exit 101"
         );
     }
 
@@ -168,7 +209,12 @@ mod tests {
     #[test]
     fn a_project_with_no_known_stack_still_reports_its_folder() {
         assert_eq!(
-            announcement("archbox", "local network", Some(&local("", Vec::new()))),
+            announcement(
+                "archbox",
+                "local network",
+                Some(&local("", Vec::new())),
+                Style::new(false)
+            ),
             "▶ Running on archbox via local network · app"
         );
     }
