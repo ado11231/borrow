@@ -7,6 +7,7 @@ use slingshot_core::config::Config;
 use slingshot_core::control::{Request, Response};
 use slingshot_core::keys::{client_name, marker};
 use slingshot_core::presentation;
+use slingshot_core::step;
 
 /// Remote cleanup comes first and stops the unlink when the Agent refuses, for example
 /// while this Client's projects still have a run, session, or sync in progress.
@@ -20,8 +21,7 @@ pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
     let registered = project::for_agent(&client_root, &target.name)?;
     let ids: Vec<String> = registered.iter().map(|p| p.id.clone()).collect();
 
-    presentation::progress(format!("Removing Slingshot access to {}", target.name));
-
+    let cleaning = step::start(format!("Cleaning up on {}", target.name));
     let mut complete = true;
     match crate::client::request(
         &target,
@@ -32,8 +32,8 @@ pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
     )
     .await
     {
-        Ok(Response::Unlinked { environment_files }) => presentation::success(format!(
-            "Removed {} on {}. Source copies and backups were kept",
+        Ok(Response::Unlinked { environment_files }) => cleaning.done(format!(
+            "Removed {} on {}",
             presentation::plural(environment_files, "environment file"),
             target.name
         )),
@@ -43,6 +43,7 @@ pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
         }
         Err(error) => {
             complete = false;
+            cleaning.clear();
             presentation::warning(format!(
                 "{error:#}. Remote cleanup is incomplete: environment files for this machine's projects remain in Slingshot storage on {}",
                 target.name
@@ -53,10 +54,12 @@ pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
     let script = removal_script(&tag);
     let mut remote = RemoteCommand::to(&target, "sh".to_string(), vec!["-c".to_string(), script]);
     remote.tty = false;
+    let removing = step::start(format!("Removing this machine's key from {}", target.name));
     match remote.interactive().await {
-        Ok(0) => presentation::success(format!("Key removed from {}", target.name)),
+        Ok(0) => removing.done(format!("Removed this machine's key from {}", target.name)),
         Ok(_) | Err(_) => {
             complete = false;
+            removing.clear();
             presentation::warning(format!(
                 "Could not reach {}, so the key is still there. Remove the line ending {tag} from its ~/.ssh/authorized_keys by hand",
                 target.name
@@ -72,7 +75,9 @@ pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
         project::forget_agent(&client_root, &target.name)?;
     }
 
-    presentation::success(format!("Forgot {}, saved {}", target.name, saved.display()));
+    presentation::success(format!("Forgot {}", target.name));
+    presentation::detail("Kept", "source copies and backups on the box");
+    presentation::detail("Saved", presentation::home_path(&saved));
     if !complete {
         presentation::warning(
             "Remote cleanup did not finish. Pair again and unlink once the Agent is reachable to finish it",

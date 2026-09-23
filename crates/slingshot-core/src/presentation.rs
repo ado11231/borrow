@@ -1,6 +1,7 @@
 //! Shared formatting for Slingshot output. Stream detection keeps redirected output plain.
 
 use std::io::{IsTerminal, stderr, stdout};
+use std::path::Path;
 use std::sync::OnceLock;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -111,6 +112,20 @@ pub fn row(label: &str, value: impl std::fmt::Display) -> String {
     format!("  {label:<12} {value}\n")
 }
 
+/// A path with the home folder written as `~`, which is shorter to read.
+pub fn home_path(path: &Path) -> String {
+    let home = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
+    tilde(path, home.as_deref())
+}
+
+fn tilde(path: &Path, home: Option<&Path>) -> String {
+    match home.and_then(|home| path.strip_prefix(home).ok()) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
 /// Whether the NO_COLOR convention is in effect.
 pub fn no_color() -> bool {
     std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty())
@@ -132,8 +147,9 @@ pub fn progress(text: impl std::fmt::Display) {
     eprintln!("{}", Style::stderr().status(text, Tone::Info));
 }
 
+/// A dim `label   value` line under a step, for facts worth keeping but not reading first.
 pub fn detail(label: &str, value: impl std::fmt::Display) {
-    eprint!("{}", row(label, value));
+    eprintln!("{}", Style::stderr().dim(row(label, value).trim_end()));
 }
 
 /// A byte count in MiB, shown as MiB or GiB depending on size.
@@ -155,6 +171,21 @@ mod tests {
         assert_eq!(capacity(512), "512.0 MiB");
         assert_eq!(capacity(1024), "1.0 GiB");
         assert_eq!(capacity(1536), "1.5 GiB");
+    }
+
+    #[test]
+    fn paths_under_home_start_with_a_tilde() {
+        let home = Path::new("/home/ado");
+        assert_eq!(
+            tilde(Path::new("/home/ado/.ssh/key"), Some(home)),
+            "~/.ssh/key"
+        );
+        assert_eq!(tilde(Path::new("/home/ado"), Some(home)), "~");
+        assert_eq!(tilde(Path::new("/etc/hosts"), Some(home)), "/etc/hosts");
+        assert_eq!(
+            tilde(Path::new("/home/adonis/x"), Some(home)),
+            "/home/adonis/x"
+        );
     }
 
     #[test]

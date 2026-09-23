@@ -5,8 +5,10 @@ use crate::keys;
 use crate::project;
 use slingshot_core::config::{Agent, Config};
 use slingshot_core::keys as core_keys;
-use slingshot_core::preflight::{self, Check};
+use slingshot_core::preflight::{self, Check, State};
+use slingshot_core::presentation::{self, Style, Tone, home_path};
 use slingshot_core::protocol::{Request, Response};
+use slingshot_core::step;
 use slingshot_core::tunnel;
 
 /// Take a pairing code, install this machine's key on the box, and save what it
@@ -19,20 +21,19 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
     let (host, port, token) = parse_code(&code)?;
     let client_name = core_keys::client_name();
 
-    let checks = vec![
-        match preflight::is_listening(format!("{host}:{port}").parse()?) {
-            true => Check::pass(format!("{host} is reachable")),
-            false => Check::fail(
-                format!("No response at {host}:{port}"),
-                "Run slingshot start on the other machine".to_string(),
-            ),
-        },
-        preflight::tool_check("rsync", Some("copying projects")),
-    ];
+    let problems: Vec<Check> = [preflight::tool_check("rsync", Some("copying projects"))]
+        .into_iter()
+        .filter(|check| check.state != State::Pass)
+        .collect();
+    preflight::report(&problems);
 
-    if preflight::report(&checks) {
+    let reaching = step::start(format!("Reaching {host}"));
+    if !preflight::is_listening(format!("{host}:{port}").parse()?) {
+        reaching.clear();
+        preflight::report(&[unreachable(&host, port)]);
         anyhow::bail!("Pairing stopped");
     }
+    reaching.set(format!("Pairing with {host}"));
 
     let (private_key, public_key) = keys::ensure(&client_name)?;
     let identity = tunnel::identity(&project::client_root()?)?;
@@ -76,31 +77,41 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
 
     let saved = config.save()?;
 
-    eprintln!();
-    slingshot_core::presentation::success(format!("Paired with {name}"));
-    slingshot_core::presentation::detail("Key", private_key.display());
-    slingshot_core::presentation::detail(
+    reaching.done(format!("Paired with {name}"));
+    presentation::detail("Key", home_path(&private_key));
+    presentation::detail(
         "Installed",
         format!("{}@{}:~/.ssh/authorized_keys", paired.user, host),
     );
-    slingshot_core::presentation::detail(
+    presentation::detail(
         "Host keys",
         format!(
             "{} ({} learned)",
-            known_hosts.display(),
+            home_path(&known_hosts),
             paired.host_keys.len()
         ),
     );
     if !paired.addresses.is_empty() {
-        slingshot_core::presentation::detail("Addresses", paired.addresses.join(", "));
+        presentation::detail("Addresses", paired.addresses.join(", "));
     }
-    slingshot_core::presentation::detail("Saved", saved.display());
+    presentation::detail("Saved", home_path(&saved));
     eprintln!();
-    eprintln!("  Try it:   slingshot run uname -a");
-    eprintln!("  In a project, slingshot run copies its source to {name} first");
+    eprintln!(
+        "  Try it: {}",
+        Style::stderr().paint("slingshot run uname -n", Tone::Info)
+    );
     eprintln!();
 
     Ok(0)
+}
+
+/// Nothing answered the pairing port. The usual cause is being on another network,
+/// because pairing only works where the box can be reached directly.
+fn unreachable(host: &str, port: u16) -> Check {
+    Check::fail(
+        format!("Could not reach {host}:{port}"),
+        "Check that slingshot start is running there, and that this machine is on the same network or tailnet",
+    )
 }
 
 /// Split a pairing code into the box's address and the one time token. Codes are

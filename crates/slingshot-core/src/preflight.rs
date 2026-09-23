@@ -52,15 +52,16 @@ impl Check {
 
 /// Print each check and return true if any check failed.
 pub fn report(checks: &[Check]) -> bool {
+    let style = Style::stderr();
     for check in checks {
         let tone = match check.state {
             State::Pass => Tone::Good,
             State::Warn => Tone::Warning,
             State::Fail => Tone::Error,
         };
-        eprintln!("{}", Style::stderr().status(&check.label, tone));
+        eprintln!("{}", style.status(&check.label, tone));
         if let Some(fix) = &check.fix {
-            eprintln!("  Fix: {fix}");
+            eprintln!("  {} {fix}", style.dim("Fix:"));
         }
     }
 
