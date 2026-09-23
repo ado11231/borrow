@@ -4,7 +4,7 @@
 
 use crate::clients;
 use anyhow::Context;
-use borrow_core::tunnel::ALPN;
+use borrow_core::tunnel::{ALPN, NOT_PAIRED};
 use iroh::endpoint::{Incoming, RecvStream, SendStream, presets};
 use iroh::{Endpoint, SecretKey};
 use std::net::{Ipv4Addr, SocketAddr};
@@ -58,7 +58,7 @@ async fn handle(incoming: Incoming, root: PathBuf, sshd: SocketAddr) -> anyhow::
     let connection = incoming.await.context("iroh handshake failed")?;
     let client = connection.remote_id();
     if !clients::allowed(&root, &client)? {
-        connection.close(1u32.into(), b"not paired with this Agent");
+        connection.close(1u32.into(), NOT_PAIRED.as_bytes());
         anyhow::bail!("refused {}, which has not paired", client.fmt_short());
     }
     info!("iroh connection from {}", client.fmt_short());

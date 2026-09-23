@@ -1,7 +1,9 @@
 //! Client connections to the Agent: TCP for pairing, and authenticated SSH control for
 //! everything else.
 
+use crate::route::{self, Route};
 use crate::ssh::RemoteCommand;
+use crate::tunnel;
 use anyhow::Context;
 use borrow_core::config::Agent;
 use borrow_core::control::{self, Request, Response};
@@ -63,6 +65,8 @@ impl std::error::Error for Refused {}
 /// One SSH connection to the Agent's private control socket.
 pub struct Control {
     name: String,
+    /// The box's iroh key when this connection went over iroh, for explaining a failure.
+    iroh: Option<String>,
     child: Child,
     input: ChildStdin,
     output: ChildStdout,
@@ -95,6 +99,10 @@ impl Control {
         });
         Ok(Control {
             name: agent.name.clone(),
+            iroh: match route::resolve(agent) {
+                Route::Iroh { key } => Some(key),
+                Route::Direct { .. } => None,
+            },
             child,
             input,
             output,
@@ -131,8 +139,14 @@ impl Control {
         }
     }
 
-    /// Explain why the connection ended, using what SSH or the remote helper printed.
+    /// Explain why the connection ended. Over iroh a direct check names the cause, since
+    /// ssh hides what the tunnel printed. Otherwise use what ssh or the remote helper said.
     async fn unreachable(&mut self) -> anyhow::Error {
+        if let Some(key) = &self.iroh
+            && let Some(message) = tunnel::diagnose(key).await.explain(&self.name)
+        {
+            return anyhow::anyhow!(message);
+        }
         let _ = tokio::time::timeout(Duration::from_secs(5), self.child.wait()).await;
         let errors = tokio::time::timeout(Duration::from_secs(2), &mut self.errors)
             .await

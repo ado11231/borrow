@@ -10,6 +10,10 @@ use std::path::Path;
 /// Names what flows over a Borrow iroh connection: a raw stream to the Agent's sshd.
 pub const ALPN: &[u8] = b"borrow/ssh/1";
 
+/// Why the Agent closes a connection from a key that never paired. The Client looks for it
+/// to tell a refusal apart from a box that is simply off.
+pub const NOT_PAIRED: &str = "not paired with this Agent";
+
 const IDENTITY_FILE: &str = "iroh.key";
 
 /// Load the identity kept in `dir`, creating it on first use. The file is readable only
