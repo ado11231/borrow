@@ -8,6 +8,7 @@ mod project;
 mod route;
 mod ssh;
 mod transfer;
+mod tunnel;
 
 use borrow_core::presentation::{self, ColorMode, Style, Tone};
 use borrow_core::protocol::DEFAULT_PORT;
@@ -46,6 +47,10 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         cmd: Vec<String>,
     },
+
+    /// ssh's ProxyCommand when the Agent is reached over iroh.
+    #[command(hide = true)]
+    InternalTunnel { key: String },
 
     /// The remote shell rsync uses, with Borrow's saved SSH options.
     #[command(hide = true)]
@@ -201,6 +206,7 @@ async fn main() {
             borrow_agent::runner::run(project, cwd, cmd).await
         }
         Commands::InternalRsh { args } => internal_rsh(args),
+        Commands::InternalTunnel { key } => tunnel::run(key).await,
         Commands::Serve { name, port } => borrow_agent::serve(name, port).await,
         Commands::Link { code, name } => commands::link::link(code, name).await,
         Commands::Unlink => commands::unlink::unlink(cli.agent).await,
@@ -241,8 +247,8 @@ fn internal_rsh(args: Vec<String>) -> anyhow::Result<i32> {
         std::env::var("BORROW_RSH_AGENT").map_err(|_| anyhow::anyhow!("Missing Agent name"))?;
     let config = borrow_core::config::Config::load()?;
     let agent = config.resolve(Some(&name))?;
-    if let Ok(host) = std::env::var(route::ROUTE_ENV) {
-        route::assume(agent, &host);
+    if let Ok(token) = std::env::var(route::ROUTE_ENV) {
+        route::assume(agent, &token);
     }
     Err(ssh::exec_for_rsync(agent, args))
 }

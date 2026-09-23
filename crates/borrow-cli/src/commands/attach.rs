@@ -49,7 +49,7 @@ pub async fn attach(
         Style::stderr().heading(format!(
             "▶ {verb} a session on {} via {} · {}",
             target.name,
-            route::resolve(target).network.name(),
+            route::resolve(target).name(),
             local.name
         ))
     );

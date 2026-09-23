@@ -8,7 +8,6 @@ use crate::transfer;
 use borrow_core::artifacts;
 use borrow_core::config::{Agent, Config};
 use borrow_core::control::{Request, Response};
-use borrow_core::network::Network;
 use borrow_core::presentation::{self, Style};
 
 /// Run `cmd` on the Agent and return its exit code. A non zero code is not an
@@ -46,7 +45,7 @@ pub async fn run(agent: Option<String>, cmd: Vec<String>) -> anyhow::Result<i32>
         "{}",
         Style::stderr().heading(announcement(
             &target.name,
-            route::resolve(target).network,
+            route::resolve(target).name(),
             local.as_ref()
         ))
     );
@@ -97,8 +96,8 @@ pub fn show_warnings(result: anyhow::Result<Response>) {
 
 /// The line printed before anything runs. Saying where the work happens is a hard
 /// requirement, including the path taken, which project folder, and what build output moved.
-fn announcement(name: &str, network: Network, local: Option<&Local>) -> String {
-    let mut line = format!("▶ Running on {name} via {}", network.name());
+fn announcement(name: &str, path: &str, local: Option<&Local>) -> String {
+    let mut line = format!("▶ Running on {name} via {path}");
 
     let Some(local) = local else {
         return line;
@@ -139,7 +138,7 @@ mod tests {
     #[test]
     fn outside_a_project_it_only_says_where() {
         assert_eq!(
-            announcement("archbox", Network::Local, None),
+            announcement("archbox", "local network", None),
             "▶ Running on archbox via local network"
         );
     }
@@ -149,7 +148,7 @@ mod tests {
         assert_eq!(
             announcement(
                 "archbox",
-                Network::Tailnet,
+                "tailnet",
                 Some(&local("crates/cli", vec![Stack::Rust]))
             ),
             "▶ Running on archbox via tailnet · app/crates/cli · target → Agent disk"
@@ -169,7 +168,7 @@ mod tests {
     #[test]
     fn a_project_with_no_known_stack_still_reports_its_folder() {
         assert_eq!(
-            announcement("archbox", Network::Local, Some(&local("", Vec::new()))),
+            announcement("archbox", "local network", Some(&local("", Vec::new()))),
             "▶ Running on archbox via local network · app"
         );
     }

@@ -1,6 +1,7 @@
 //! Building and running SSH commands to the Agent.
 
-use crate::route;
+use crate::route::{self, Route};
+use crate::tunnel;
 use anyhow::Context;
 use borrow_core::config;
 use shell_words::join;
@@ -39,6 +40,8 @@ pub struct RemoteCommand {
     /// The name the box's host keys were learned under, which stays the same whichever
     /// address is dialed.
     pub host_key_alias: Option<String>,
+    /// How ssh reaches the box when no address answers directly.
+    pub proxy: Option<String>,
     /// Whether to ask for a terminal on the box. See `wants_terminal`.
     pub tty: bool,
     pub program: String,
@@ -50,8 +53,13 @@ impl RemoteCommand {
     /// Everything ssh needs comes from the config, so nobody has to keep an entry in
     /// `~/.ssh/config` in step with this.
     pub fn to(agent: &config::Agent, program: String, args: Vec<String>) -> RemoteCommand {
+        let (host, proxy) = match route::resolve(agent) {
+            Route::Direct { host, .. } => (host, None),
+            Route::Iroh { key } => (agent.host.clone(), Some(tunnel::proxy_command(&key))),
+        };
         RemoteCommand {
-            host: route::resolve(agent).host,
+            host,
+            proxy,
             user: Some(agent.user.clone()),
             port: agent.port,
             identity_file: agent.identity_file.clone(),
@@ -101,6 +109,11 @@ impl RemoteCommand {
             argv.push(format!("UserKnownHostsFile=\"{}\"", known_hosts.display()));
             argv.push("-o".to_string());
             argv.push("StrictHostKeyChecking=yes".to_string());
+        }
+
+        if let Some(proxy) = &self.proxy {
+            argv.push("-o".to_string());
+            argv.push(format!("ProxyCommand={proxy}"));
         }
 
         if let Some(alias) = &self.host_key_alias {
@@ -297,6 +310,7 @@ mod tests {
             identity_file: None,
             known_hosts: None,
             host_key_alias: None,
+            proxy: None,
             tty: false,
             program: "echo".to_string(),
             args: args.iter().map(|s| s.to_string()).collect(),
