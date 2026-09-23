@@ -33,11 +33,24 @@ struct Gpu: Decodable {
     let vram: Usage?
 }
 
+struct Fix: Decodable {
+    /// `agent` for the box, `client` for this machine.
+    let machine: String
+    let command: String
+}
+
+struct Problem: Decodable {
+    let title: String
+    let detail: String
+    let fix: Fix?
+}
+
 struct Status: Decodable {
     let agent: String
     let online: Bool
     let path: String?
     let error: String?
+    let problem: Problem?
     let cpu: Percent?
     let memory: Usage?
     let workspace: Space?

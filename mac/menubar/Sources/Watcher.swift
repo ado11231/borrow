@@ -6,6 +6,11 @@ import Observation
 @Observable
 final class Watcher {
     private(set) var status: Status?
+    /// The last numbers the box sent, kept greyed out while it is offline.
+    private(set) var lastOnline: Status?
+    private(set) var lastSeen: Date?
+    /// True from Try again until the next answer, so the button can show it is working.
+    private(set) var retrying = false
     /// Why there is nothing to show, such as a missing program or a helper that keeps failing.
     private(set) var problem: String?
 
@@ -37,6 +42,16 @@ final class Watcher {
         stop()
         stopping = false
         launch(program: program, agent: agent)
+    }
+
+    /// Skip the helper's wait and try the box again now.
+    func retry() {
+        guard let input, process?.isRunning == true else {
+            start()
+            return
+        }
+        retrying = true
+        try? input.fileHandleForWriting.write(contentsOf: Data("retry\n".utf8))
     }
 
     func stop() {
@@ -104,6 +119,15 @@ final class Watcher {
         self.status = status
         problem = nil
         restarts = 0
+        retrying = false
+        if lastOnline?.agent != status.agent {
+            lastOnline = nil
+            lastSeen = nil
+        }
+        if status.online {
+            lastOnline = status
+            lastSeen = Date()
+        }
     }
 
     /// The helper only exits on its own when something is wrong, so show why and try again.

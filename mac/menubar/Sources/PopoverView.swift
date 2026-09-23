@@ -71,12 +71,25 @@ struct PopoverView: View {
             Text(watcher.status?.agent.nonEmpty ?? "Slingshot")
                 .font(.headline)
             Spacer()
-            if let path = watcher.status?.path {
+            if watcher.status?.online == true, let path = watcher.status?.path {
                 Text("via \(path)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } else if let lastSeen = watcher.lastSeen {
+                TimelineView(.periodic(from: .now, by: 15)) { context in
+                    Text("Last seen \(ago(lastSeen, now: context.date))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
+    }
+
+    private func ago(_ date: Date, now: Date) -> String {
+        guard now.timeIntervalSince(date) >= 60 else { return "just now" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter.localizedString(for: date, relativeTo: now)
     }
 
     @ViewBuilder
@@ -149,17 +162,45 @@ struct PopoverView: View {
         }
     }
 
+    @ViewBuilder
     private var offline: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(watcher.status == nil && watcher.problem == nil ? "Connecting…" : "Not connected")
-                .font(.callout.weight(.medium))
-            if let reason = watcher.problem ?? watcher.status?.error {
-                Text(reason)
-                    .font(.caption)
+        if let problem = watcher.problem {
+            ProblemView(
+                title: "Slingshot could not start",
+                detail: problem,
+                fix: Fix(machine: "client", command: "slingshot menubar"),
+                agent: nil,
+                retrying: watcher.retrying,
+                retry: watcher.retry
+            )
+        } else if let problem = watcher.status?.problem {
+            ProblemView(
+                title: problem.title,
+                detail: problem.detail,
+                fix: problem.fix,
+                agent: watcher.status?.agent,
+                retrying: watcher.retrying,
+                retry: watcher.retry
+            )
+        } else {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Connecting…")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
             }
+        }
+        if let last = watcher.lastOnline {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Last known")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                metrics(last)
+            }
+            .saturation(0)
+            .opacity(0.4)
+            .allowsHitTesting(false)
         }
     }
 
@@ -295,6 +336,88 @@ struct PartRow: View {
                     .foregroundStyle(valueColor(level))
             }
             UsageBar(fraction: fraction, color: color)
+        }
+    }
+}
+
+/// What went wrong in plain words, the command that fixes it, and a way to try again now.
+struct ProblemView: View {
+    let title: String
+    let detail: String
+    let fix: Fix?
+    let agent: String?
+    let retrying: Bool
+    let retry: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(title)
+                    .font(.callout.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            if let fix {
+                CommandBox(
+                    label: fix.machine == "agent" ? "Run on \(agent ?? "the box")" : "Run on this machine",
+                    command: fix.command
+                )
+            }
+            Button(action: retry) {
+                HStack(spacing: 6) {
+                    if retrying {
+                        ProgressView().controlSize(.mini)
+                    }
+                    Text(retrying ? "Trying…" : "Try again")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .controlSize(.regular)
+            .disabled(retrying)
+        }
+    }
+}
+
+/// A command shown as code, with a button that copies it.
+struct CommandBox: View {
+    let label: String
+    let command: String
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            HStack {
+                Text(command)
+                    .font(.system(.callout, design: .monospaced))
+                    .textSelection(.enabled)
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(command, forType: .string)
+                    copied = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.5))
+                        copied = false
+                    }
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .foregroundStyle(copied ? Color.green : Color.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("Copy")
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
         }
     }
 }
