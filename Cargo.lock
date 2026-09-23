@@ -240,59 +240,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "borrow-agent"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "borrow-core",
- "directories",
- "iroh",
- "libc",
- "rand",
- "serde",
- "serde_json",
- "shell-words",
- "sysinfo",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "borrow-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "borrow-agent",
- "borrow-core",
- "clap",
- "crossterm",
- "directories",
- "iroh",
- "serde",
- "serde_json",
- "shell-words",
- "tokio",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "borrow-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "directories",
- "ignore",
- "iroh",
- "rand",
- "serde",
- "serde_json",
- "sha2",
- "sysinfo",
- "tokio",
- "toml",
-]
-
-[[package]]
 name = "bstr"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3056,6 +3003,59 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
+name = "slingshot-agent"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "directories",
+ "iroh",
+ "libc",
+ "rand",
+ "serde",
+ "serde_json",
+ "shell-words",
+ "slingshot-core",
+ "sysinfo",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "slingshot-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "crossterm",
+ "directories",
+ "iroh",
+ "serde",
+ "serde_json",
+ "shell-words",
+ "slingshot-agent",
+ "slingshot-core",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "slingshot-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "directories",
+ "ignore",
+ "iroh",
+ "rand",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sysinfo",
+ "tokio",
+ "toml",
+]
 
 [[package]]
 name = "smallvec"
