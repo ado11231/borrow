@@ -14,7 +14,8 @@ use borrow_core::presentation;
 pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
     let mut config = Config::load()?;
     let target = config.resolve(agent.as_deref())?.clone();
-    let tag = marker(&client_name());
+    let client = client_name();
+    let tag = marker(&client);
     let client_root = project::client_root()?;
     let registered = project::for_agent(&client_root, &target.name)?;
     let ids: Vec<String> = registered.iter().map(|p| p.id.clone()).collect();
@@ -22,7 +23,15 @@ pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
     presentation::progress(format!("Removing Borrow access to {}", target.name));
 
     let mut complete = true;
-    match crate::client::request(&target, Request::Unlink { projects: ids }).await {
+    match crate::client::request(
+        &target,
+        Request::Unlink {
+            client,
+            projects: ids,
+        },
+    )
+    .await
+    {
         Ok(Response::Unlinked { environment_files }) => presentation::success(format!(
             "Removed {} on {}. Source copies and backups were kept",
             presentation::plural(environment_files, "environment file"),

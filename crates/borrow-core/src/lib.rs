@@ -13,3 +13,4 @@ pub mod stack;
 pub mod storage;
 pub mod sync;
 pub mod telemetry;
+pub mod tunnel;

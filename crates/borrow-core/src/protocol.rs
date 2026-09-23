@@ -22,6 +22,9 @@ pub enum Request {
         public_key: String,
         user: String,
         host_keys: Vec<String>,
+        /// The Client's iroh public key, which the Agent will accept connections from.
+        #[serde(default)]
+        iroh: Option<String>,
     },
 }
 
@@ -54,6 +57,9 @@ pub struct Paired {
     /// address it paired on stops answering.
     #[serde(default)]
     pub addresses: Vec<String>,
+    /// The Agent's iroh public key, which reaches it from any network.
+    #[serde(default)]
+    pub iroh: Option<String>,
     pub specs: Specs,
 }
 

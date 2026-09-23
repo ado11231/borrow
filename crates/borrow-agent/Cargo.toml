@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 borrow-core = { path = "../borrow-core" }
 anyhow = { workspace = true }
+iroh = { workspace = true }
 directories = { workspace = true }
 libc = { workspace = true }
 rand = { workspace = true }

@@ -12,6 +12,7 @@ path = "src/main.rs"
 borrow-core = { path = "../borrow-core" }
 borrow-agent = { path = "../borrow-agent" }
 anyhow = { workspace = true }
+iroh = { workspace = true }
 clap = { workspace = true }
 crossterm = { workspace = true }
 directories = { workspace = true }

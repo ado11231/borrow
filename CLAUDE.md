@@ -213,7 +213,8 @@ host keys, keeping source copies and backups.
 
 **The Phase 2 mount surface is gone.** Its fields were deleted from config and from the
 pairing message, so a config file written before that no longer loads and the machines must
-run `borrow link` again. The control protocol is at version 4.
+run `borrow link` again. The control protocol is at version 5, raised when unlink began
+naming the Client so the Agent can forget its iroh key.
 
 CLI output uses shared formatting in `borrow-core/src/presentation.rs`. Messages use
 sentence capitalization. CPU, RAM, GPU, and VRAM labels use uppercase. Colors have text

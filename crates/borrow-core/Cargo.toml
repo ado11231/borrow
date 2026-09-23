@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = { workspace = true }
+iroh = { workspace = true }
 directories = { workspace = true }
 ignore = { workspace = true }
 rand = { workspace = true }

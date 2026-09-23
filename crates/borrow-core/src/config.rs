@@ -47,6 +47,9 @@ pub struct Agent {
     /// Other addresses the box reported at pairing. Configs saved before this have none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub addresses: Vec<String>,
+    /// The box's iroh public key. Configs saved before iroh have none.
+    #[serde(default)]
+    pub iroh: Option<String>,
     /// What the box is, fetched once at pairing so `info` is instant.
     pub specs: Option<Specs>,
 }
@@ -337,6 +340,7 @@ mod tests {
             known_hosts: None,
             program: None,
             addresses: Vec::new(),
+            iroh: None,
             specs: None,
         }
     }

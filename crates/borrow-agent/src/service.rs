@@ -226,9 +226,14 @@ fn respond(root: &Path, name: &str, request: Request) -> anyhow::Result<Response
             projects::env_remove(root, &project, &target)?;
             Response::Done
         }
-        Request::Unlink { projects: ids } => Response::Unlinked {
-            environment_files: projects::unlink(root, &ids)?,
-        },
+        Request::Unlink {
+            client,
+            projects: ids,
+        } => {
+            let environment_files = projects::unlink(root, &ids)?;
+            crate::clients::forget(root, &client)?;
+            Response::Unlinked { environment_files }
+        }
         Request::Ping
         | Request::Begin { .. }
         | Request::Finish { .. }

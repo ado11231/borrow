@@ -1,10 +1,12 @@
 //! The Agent daemon: pairing over TCP, plus the private control service used for
 //! everything after pairing. Work itself runs through SSH.
 
+pub mod clients;
 pub mod jobs;
 pub mod projects;
 pub mod runner;
 pub mod service;
+pub mod tunnel;
 
 use anyhow::Context;
 use borrow_core::keys;
@@ -12,7 +14,9 @@ use borrow_core::network::Network;
 use borrow_core::preflight;
 use borrow_core::protocol::{Paired, Request, Response};
 use borrow_core::telemetry;
+use borrow_core::tunnel;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -46,6 +50,8 @@ struct Agent {
     name: String,
     user: String,
     addresses: Vec<String>,
+    root: PathBuf,
+    iroh: String,
     pairing: Mutex<Option<Pairing>>,
 }
 
@@ -60,6 +66,8 @@ pub async fn serve(name: Option<String>, port: u16) -> anyhow::Result<i32> {
     }
 
     let _service = service::start(name.clone())?;
+    let root = service::root()?;
+    let identity = tunnel::identity(&root)?;
     let user = whoami().context("Could not work out which user is running the daemon")?;
     let token = new_token();
     let addresses = bind_addresses(port);
@@ -72,6 +80,8 @@ pub async fn serve(name: Option<String>, port: u16) -> anyhow::Result<i32> {
             .filter(|addr| !addr.ip().is_loopback())
             .map(|addr| addr.ip().to_string())
             .collect(),
+        root,
+        iroh: identity.public().to_string(),
         pairing: Mutex::new(Some(Pairing {
             token: token.clone(),
             expires: Instant::now() + CODE_LIFETIME,
@@ -153,6 +163,7 @@ fn answer(request: Request, agent: &Agent) -> Response {
             token,
             client,
             public_key,
+            iroh,
             ..
         } => pair(
             agent,
@@ -160,6 +171,7 @@ fn answer(request: Request, agent: &Agent) -> Response {
             &Client {
                 name: client,
                 public_key,
+                iroh,
             },
         ),
     }
@@ -170,6 +182,7 @@ fn answer(request: Request, agent: &Agent) -> Response {
 struct Client {
     name: String,
     public_key: String,
+    iroh: Option<String>,
 }
 
 fn pair(agent: &Agent, token: &str, client: &Client) -> Response {
@@ -202,8 +215,13 @@ fn pair(agent: &Agent, token: &str, client: &Client) -> Response {
     }
 }
 
-/// Authorize the Client key for SSH execution and private control.
+/// Authorize the Client key for SSH execution and private control, and its iroh key for
+/// reaching sshd from other networks. An older Client without an iroh key pairs as before.
 fn accept(agent: &Agent, client: &Client) -> anyhow::Result<Paired> {
+    if let Some(iroh) = &client.iroh {
+        clients::allow(&agent.root, &client.name, iroh)
+            .context("Could not record the Client's iroh key")?;
+    }
     let authorized = keys::authorize(&client.name, &client.public_key)
         .context("Could not add the Client's key to authorized_keys")?;
 
@@ -219,6 +237,7 @@ fn accept(agent: &Agent, client: &Client) -> anyhow::Result<Paired> {
             .ok()
             .and_then(|path| path.to_str().map(str::to_string)),
         addresses: agent.addresses.clone(),
+        iroh: Some(agent.iroh.clone()),
         specs: telemetry::specs(&agent.name),
     })
 }

@@ -13,7 +13,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Wire version of this control protocol. Both machines must agree on it, so any change
 /// to a request or response shape has to raise it.
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 
 /// Largest frame in either direction. Manifests for very large projects are the limit.
 pub const MAX_FRAME: u32 = 16 * 1024 * 1024;
@@ -78,8 +78,10 @@ pub enum Request {
         project: String,
         target: String,
     },
-    /// Remove environment files for these projects. Source and backups stay.
+    /// Remove environment files for these projects and stop accepting this Client over
+    /// iroh. Source and backups stay.
     Unlink {
+        client: String,
         projects: Vec<String>,
     },
 }

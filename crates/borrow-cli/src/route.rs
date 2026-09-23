@@ -101,6 +101,7 @@ mod tests {
             known_hosts: None,
             program: None,
             addresses: addresses.iter().map(|a| a.to_string()).collect(),
+            iroh: None,
             specs: None,
         }
     }

@@ -2,10 +2,12 @@
 
 use crate::client;
 use crate::keys;
+use crate::project;
 use borrow_core::config::{Agent, Config};
 use borrow_core::keys as core_keys;
 use borrow_core::preflight::{self, Check};
 use borrow_core::protocol::{Request, Response};
+use borrow_core::tunnel;
 
 /// Take a pairing code, install this machine's key on the box, and save what it
 /// takes to reach it again. Every step says what it did.
@@ -33,6 +35,7 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
     }
 
     let (private_key, public_key) = keys::ensure(&client_name)?;
+    let identity = tunnel::identity(&project::client_root()?)?;
 
     let response = client::pair(
         &host,
@@ -43,6 +46,7 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
             public_key,
             user: this_user(),
             host_keys: core_keys::host_keys(),
+            iroh: Some(identity.public().to_string()),
         },
     )
     .await?;
@@ -66,6 +70,7 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
         known_hosts: Some(known_hosts.clone()),
         program: paired.program.clone(),
         addresses: paired.addresses.clone(),
+        iroh: paired.iroh.clone(),
         specs: Some(paired.specs),
     });
 
