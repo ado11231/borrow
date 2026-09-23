@@ -61,6 +61,7 @@ struct Status: Decodable {
 struct Notice: Decodable {
     let kind: String
     let title: String
+    let subtitle: String?
     let body: String
 }
 

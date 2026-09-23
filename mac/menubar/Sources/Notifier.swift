@@ -12,6 +12,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     func post(_ notice: Notice) {
         let content = UNMutableNotificationContent()
         content.title = notice.title
+        if let subtitle = notice.subtitle {
+            content.subtitle = subtitle
+        }
         content.body = notice.body
         content.threadIdentifier = notice.kind
         if notice.kind != "job_finished" {
