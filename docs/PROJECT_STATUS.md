@@ -1,6 +1,6 @@
 # Borrow Project Status
 
-Last updated: September 20, 2026
+Last updated: September 22, 2026
 
 This document explains what Borrow is, how the repository is organized, what we completed in each phase, and what comes next.
 
@@ -38,9 +38,9 @@ The computer where the user works. It keeps the source files and sends commands.
 
 The computer with more CPU, memory, disk space, or GPU power. It runs the real work.
 
-### Coordinator
+### iroh
 
-A future service that will connect the Client and Agent when they are on different networks. This belongs to Phase 4 and does not exist yet.
+A library both machines use to reach each other across networks. It dials a machine by its public key, connects directly through NAT when it can, and relays through a public server when it cannot. ssh runs inside it, so a relay sees only encrypted bytes. This is Phase 4 work. It replaced the earlier plan of a Coordinator server we would build and host.
 
 ### Source copy
 
@@ -559,7 +559,7 @@ Start a long build, close the Client, reconnect later, attach again, and return 
 
 Status: Complete for local implementation and verification. Not yet run on two real machines.
 
-Done on September 20, 2026, to clear the ground before the Coordinator is built on top of it.
+Done on September 20, 2026, to clear the ground before Phase 4 is built on top of it.
 
 ### Four real defects, each found by reading both sides of the code
 
@@ -591,7 +591,9 @@ Re-pair the two real machines, which the protocol bump now requires, and run the
 
 ### Phase 4
 
-Connect machines across different networks through a Coordinator. Prefer a direct connection when available and use a secure relay when needed.
+Status: In progress
+
+Once paired, reach the Agent from anywhere for as long as it is on and `borrow serve` is running. The Client tries the local address, then the tailnet address, then iroh, and says which one it used. No account, no server to host, and no router change. Pairing still happens on the same network or tailnet. The step by step plan is in `docs/GUIDE.md`.
 
 ### Phase 5
 
@@ -599,7 +601,7 @@ Add visible status, notifications, and automatic port forwarding.
 
 ### Phase 6
 
-Add model workloads, faster direct connections, and broader platform support.
+Add model workloads, pairing across networks, a self hosted relay setting, and broader platform support.
 
 ### Phase 7
 

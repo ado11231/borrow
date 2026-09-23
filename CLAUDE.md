@@ -30,8 +30,8 @@ remote desktop.**
 * **Working name:** `borrow`. It may change.
 * **Language:** Rust.
 * **Two roles:** the **Client** is the machine you work from. The **Agent** is the machine
-  with the resources. A third tiny piece, the **Coordinator**, exists only for cross network
-  use and is Phase 4 work.
+  with the resources. Across networks the two meet through **iroh**, which we wrap rather
+  than build, and which is Phase 4 work.
 
 ---
 
@@ -43,8 +43,8 @@ remote desktop.**
    its location, for example `▶ Running on archbox`. This is a hard requirement and not
    cosmetic.
 3. **Do not rebuild existing systems.** We wrap `ssh`, `rsync`, `tmux`, `docker`, `ollama`,
-   and `nvidia-smi`. Do not write a custom SSH, file transfer, terminal multiplexer,
-   container engine, or inference engine.
+   `nvidia-smi`, and the `iroh` library. Do not write a custom SSH, file transfer, terminal
+   multiplexer, container engine, inference engine, relay server, or NAT traversal.
 4. **Keep setup dead simple.** One binary per machine, one pairing step, one command to use.
    Reject designs that add setup friction.
 5. **Stay platform generic.** Model everything as Client and Agent, never as Mac and Linux.
@@ -53,8 +53,8 @@ remote desktop.**
    own machine becomes a preflight check or an installer step. Every failed check prints the
    exact command that fixes it. Detect and instruct, never auto install.
 7. **Nothing may be a prerequisite that a stranger would not already have.** A mesh VPN such
-   as Tailscale is a detected fast path, never a requirement. The Coordinator is the answer
-   to "works from anywhere".
+   as Tailscale is a detected fast path, never a requirement. iroh is the answer to "works
+   from anywhere", and it needs no account, no server, and no open router port.
 
 ---
 
@@ -79,10 +79,16 @@ remote desktop.**
 ## Architecture, the short version
 
 ```
-CLIENT ──► COORDINATOR (tiny, cross network only) ──► AGENT
-type commands   introduces and relays                 runs the real work,
-see output      the two machines                      keeps project copies
+CLIENT ──── ssh, over the first path that answers ────► AGENT
+type commands    local network, tailnet, or iroh        runs the real work,
+see output                                              keeps project copies
 ```
+
+**Paths, tried in order.** The Client tries the Agent's saved local address, then its
+tailnet address, then iroh, and uses the first that answers. Every command says which one
+it used. iroh dials the Agent by its public key, punches through NAT to connect directly
+when it can, and falls back to a public relay when it cannot. Either way ssh runs inside,
+so a relay only ever carries encrypted bytes.
 
 **Transport, already decided.** The **daemon is the control plane**, owning identity,
 pairing, job records, health, sessions, sync leases, and reachability. **ssh is the data
@@ -98,11 +104,13 @@ single use. The daemon binds to loopback plus the LAN, never `0.0.0.0`. Installe
 named so they can be revoked. `borrow unlink` works. Remote arguments are always quoted and
 never concatenated into a shell. Control messages carry a version, a size limit, and
 timeouts. The Agent OS account is the trust boundary. Never signal a process by PID alone;
-match its start time too. The Coordinator relays an encrypted stream and can read nothing.
+match its start time too. The Agent accepts iroh connections only from Clients it paired
+with, and forwards them only to its own sshd. Relays can read nothing.
 
 * The **Client** exposes `localhost` ports that forward to the Agent.
 * The **Agent** runs work inside the project copy and dials outward to connect.
-* The **Coordinator** is only needed across networks and is not used on the same LAN.
+* **Pairing** still happens on the same network or tailnet. Pairing across networks is later
+  work.
 
 **Files.** Source is edited on the Client. The Agent keeps a filtered copy per project and
 Agent, updated with rsync through three way sync against a shared baseline. Conflicts stop
@@ -142,8 +150,7 @@ borrow/
 ├── crates/
 │   ├── borrow-core/        # shared: protocol, config, source, sync, stack detect, telemetry, error
 │   ├── borrow-cli/         # the borrow command, on the Client
-│   ├── borrow-agent/       # the Linux daemon, a systemd service
-│   └── borrow-coordinator/ # tiny cross network server, Phase 4
+│   └── borrow-agent/       # the Linux daemon, a systemd service
 ├── deploy/                 # systemd unit and installer
 ├── mac/menubar/            # Mac only menu bar and notifications, Phase 5
 └── docs/
@@ -182,9 +189,11 @@ planned.
 1. **Phase 1.** `run` plus pairing, on the LAN only, plus `info`. This is the spine.
 2. **Phase 2.** Artifact split with stack detection. Its SSHFS mount was later replaced.
 3. **Phase 3.** Source copies and sync, `attach`, `env`, `ps` and `stop`, live `health` and `top`.
-4. **Phase 4.** Coordinator and relay tunnel for cross network use. This is the hardest code.
+4. **Phase 4.** Works from anywhere: path selection, then iroh for cross network use, with
+   NAT traversal and relay fallback included.
 5. **Phase 5.** Menu bar with live readout, notifications, automatic port forwarding.
-6. **Phase 6.** Wrap Ollama and ComfyUI, NAT hole punching, Linux to Linux hardening.
+6. **Phase 6.** Wrap Ollama and ComfyUI, pairing across networks, self hosted relays, Linux
+   to Linux hardening.
 7. **Phase 7.** Ship it: static binaries, installer, packages, `borrow doctor`, README.
 
 Each phase must leave a working, usable tool. Phase 4 gates publishing, because before it
@@ -194,7 +203,7 @@ Each phase must leave a working, usable tool. Phase 4 gates publishing, because 
 
 ## Current state
 
-**Phases 1 and 3 are complete.** Phase 3 replaced Phase 2's SSHFS execution with filtered
+**Phases 1 and 3 are complete. Phase 4 is in progress.** Phase 3 replaced Phase 2's SSHFS execution with filtered
 source copies and kept its stack detection and artifact split.
 
 Pairing creates only Client to Agent SSH trust and records the Agent's Borrow path.

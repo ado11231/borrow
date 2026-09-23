@@ -106,8 +106,9 @@ operating systems.
 * **Agent.** The machine with the resources. It does the real work and keeps project copies. In
   my setup this is an Arch Linux desktop.
 
-There is a third piece, the **Coordinator**, but it only exists to connect a Client and an
-Agent that are on different networks. It is Phase 4 work and does not exist yet.
+There is no third piece to run. When the two are on different networks they meet through
+**iroh**, a library that dials a machine by its public key, punches through NAT, and falls
+back to a public relay when it must. That is Phase 4 work.
 
 Thinking in Client and Agent rather than Mac and Linux is what makes Mac to Linux, Linux
 to Linux, and even Linux to Mac fall out of the same code for free. The only genuinely
@@ -145,15 +146,15 @@ feel effortless and safe.
 ## The three pieces
 
 ```
-   ┌─────────────┐        ┌──────────────┐        ┌──────────────┐
-   │   CLIENT    │        │ COORDINATOR  │        │    AGENT     │
-   │             │◄──────►│  (Phase 4)   │◄──────►│              │
-   └─────────────┘        └──────────────┘        └──────────────┘
-   You type commands      Introduces the two      Runs the real work.
-   here. Exposes          machines and relays     Keeps project copies.
-   localhost ports        traffic when they       Reports specs and
-   forwarding to          cannot connect          health. Dials
-   the Agent.             directly.               outward to connect.
+   ┌─────────────┐                                 ┌──────────────┐
+   │   CLIENT    │ ─── ssh, over the first path ──►│    AGENT     │
+   │             │     that answers: local         │              │
+   └─────────────┘     network, tailnet, or iroh   └──────────────┘
+   You type commands                               Runs the real work.
+   here. Exposes                                   Keeps project copies.
+   localhost ports                                 Reports specs and
+   forwarding to                                   health. Dials
+   the Agent.                                      outward to connect.
 ```
 
 * **Client.** Runs your commands, shows output, and exposes `localhost` ports that quietly
@@ -162,8 +163,10 @@ feel effortless and safe.
 * **Agent.** Does the real work, keeps project copies, reports specs and health, and dials
   outward rather than waiting for inbound connections. Dialing out is what gets through
   home routers and NAT without any port forwarding.
-* **Coordinator.** Tiny, cheap, always on. Only needed when Client and Agent are on
-  different networks. Not used at all on a shared home network.
+* **iroh.** Not a piece anyone runs. A library inside both ends that connects them across
+  networks. The Agent keeps an iroh identity and stays reachable through iroh's public
+  relays, which introduce the two machines and carry traffic only when a direct connection
+  cannot be made.
 
 ## The central design decision: control plane versus data plane
 
@@ -206,8 +209,9 @@ The daemon grows on a schedule:
 * **Phase 3.** Moved every structured request behind ssh authentication, and now owns sync
   leases, persistent tmux sessions, job records, and environment files, so `ps` and `stop`
   are real and sessions survive a disconnect.
-* **Phase 4.** Stops listening and starts dialing outward to the Coordinator, which is what
-  makes cross network use possible through a home router.
+* **Phase 4.** Also runs an iroh endpoint that dials outward to iroh's relays, which is what
+  makes cross network use possible through a home router. Paired Clients reach its sshd
+  through that endpoint.
 * **Phase 7.** The very same daemon is what a stranger installs. `serve` and `link` are the
   entire setup experience.
 
@@ -384,25 +388,34 @@ line such as `archbox · 40% CPU · 12/32GB · GPU 60°C`.
 
 ## Networking, in order of difficulty
 
-1. **Same network.** No Coordinator. The Client reaches the Agent directly by local IP,
-   using ssh for work and the daemon port for structured data. Build this first.
-2. **Relay through the Coordinator.** The Agent dials out to the Coordinator, the Client
-   connects to it, and all traffic relays through. This always works. Build this second.
-3. **Direct connection with hole punching.** Try to connect the two machines directly, and
-   fall back to relay if it fails. Lower latency and cheaper to run. Build this last.
+1. **Same network.** The Client reaches the Agent's sshd directly by local IP.
+2. **Mesh VPN.** When both machines are on a tailnet, the Client reaches the Agent's tailnet
+   address directly.
+3. **iroh.** The Client dials the Agent's iroh public key. iroh tries to connect the two
+   machines directly by punching through NAT, and relays through a public server when that
+   fails. ssh runs inside the iroh stream either way.
 
 | Situation | Path taken |
 | --- | --- |
-| Same local network | Direct local IP |
-| Mesh VPN present on both machines | Direct over the tailnet, no Coordinator |
-| Neither | Coordinator relay, then hole punch if possible |
+| Same local network | Local address |
+| Mesh VPN present on both machines | Tailnet address |
+| Neither | iroh, direct when NAT allows, relayed when it does not |
 
-The Client tries these in order and always says which one it used.
+The Client tries these in order, uses the first that answers, and always says which one it
+used.
 
-**The Coordinator is not an optimization, it is the connection story.** For a public tool,
-"works from anywhere" cannot mean "first go set up a VPN." A mesh VPN is a supported fast
-path: detect it, use it when present, skip the relay entirely. Anyone who has one gets
-lower latency for free. Anyone who does not still gets a working tool.
+**iroh is not an optimization, it is the connection story.** For a public tool, "works
+from anywhere" cannot mean "first go set up a VPN" or "first rent a server." A mesh VPN is a
+supported fast path: detect it, use it when present. Anyone who has neither still gets a
+working tool, with no account, no server, and no router port.
+
+**Why iroh and not our own Coordinator.** A Coordinator was the original plan. Wrapping iroh
+is golden rule 3: NAT traversal and relaying are an existing, maintained system. iroh
+dials machines by public key, authenticates both ends, encrypts end to end, and ships free
+public relays plus an open source relay anyone can host. What it costs us is a dependency
+on those public relays for introductions and for fallback traffic. iroh's own docs call them
+suitable for development and testing, so a setting for a self hosted relay comes before a
+wide release.
 
 ## Security model
 
@@ -460,9 +473,24 @@ open source tool that is a serious responsibility. These are design constraints 
 * Remote command arguments are passed safely and are never string concatenated into a
   shell.
 
-**The Coordinator can read nothing.** It relays an encrypted ssh stream. It cannot see
-commands, output, or files. The README says this plainly, because "route my development
-traffic through a stranger's server" is the very first objection anyone will raise.
+**Across networks**
+
+* The Agent keeps a persistent iroh secret key in its data directory, mode 600. Its public
+  key is the Agent's iroh address and is given to the Client at pairing.
+* Each Client has its own iroh key. Pairing records the Client's public key on the Agent,
+  and the Agent accepts iroh connections only from recorded keys. `borrow unlink` removes
+  the record.
+* An accepted iroh stream is forwarded only to the Agent's own sshd on loopback. Nothing
+  else is reachable through it, and ssh still authenticates the Client key and the pinned
+  host key.
+* Pairing itself still happens on the same network or tailnet. A pairing code sent across a
+  relay would be a bearer token in the open, so pairing across networks waits for a password
+  authenticated exchange.
+
+**Relays can read nothing.** iroh encrypts end to end, and ssh encrypts again inside it. A
+relay cannot see commands, output, or files. The README says this plainly, because "route
+my development traffic through a stranger's server" is the very first objection anyone will
+raise.
 
 ## Rust design notes
 
@@ -587,9 +615,8 @@ code:
 
 * **`serde`'s `Serialize` and `Deserialize`** on the protocol types, so the wire format is
   defined once and used by both machines.
-* **A transport abstraction in Phase 4**, once a connection can be a direct LAN socket, a
-  tailnet connection, or a Coordinator relay. Three real implementations is when an
-  abstraction becomes worth its cost.
+* **Not a transport trait in Phase 4.** A connection can be a local address, a tailnet
+  address, or iroh, but all three end as ssh arguments. A plain enum and a match cover it.
 * **A stack detector** in Phase 2, if the Rust, Node, and Python cases genuinely share a
   shape. If they do not, three plain functions and a match are better than a trait.
 
@@ -694,12 +721,6 @@ borrow/
 │   │       ├── projects.rs     # source copies, leases, environment files
 │   │       ├── jobs.rs         # job records, tmux sessions, stopping
 │   │       └── runner.rs       # foreground runs
-│   │
-│   └── borrow-coordinator/     # tiny always on server, cross network only
-│       └── src/
-│           ├── main.rs
-│           ├── rendezvous.rs   # introduces Client and Agent
-│           └── relay.rs        # relays traffic when direct fails
 │
 ├── deploy/
 │   ├── borrow-agent.service    # systemd unit
@@ -742,8 +763,9 @@ borrow top              # live resources and active jobs
 
 ## Where things stand today
 
-Phases 1 and 3 are complete. Phase 3 replaced Phase 2's SSHFS execution with
-filtered source copies, keeping Phase 2's project detection and artifact split.
+Phases 1 and 3 are complete, and Phase 4 is in progress. Phase 3 replaced Phase 2's SSHFS
+execution with filtered source copies, keeping Phase 2's project detection and artifact
+split.
 
 Implemented today:
 
@@ -793,7 +815,7 @@ Still outstanding:
 3. File watchers inside sessions, multiple Clients sharing one Agent account, and large
    Node and Python projects.
 4. Applying split overrides from `borrow.toml`. Only `sync.exclude` is read today.
-5. Build the cross network Coordinator in Phase 4.
+5. Finish Phase 4: path selection and iroh.
 
 SSH host paths with spaces remain quoted, interactive commands request a terminal,
 and password fallback stays disabled. Borrow stores SSH options in its own configuration
@@ -997,23 +1019,37 @@ during a clean release build, and `attach` returned to the finished build.
 
 At the end of this phase borrow is an impressive, shippable personal tool.
 
-## Phase 4: Cross network tunnel
+## Phase 4: Works from anywhere
 
 **This is the connection story, not an optimization.** Until it exists, "works from
 anywhere" means "go set up a VPN first", which is precisely the friction this project
 exists to remove. **This phase gates publishing.**
 
-**Status: not started.**
+**Status: in progress.**
 
-* Build `borrow-coordinator`, starting with rendezvous only.
-* Detect a mesh VPN and prefer a direct connection when one is present.
-* The Client says which path it used: `▶ archbox · via relay` or `· direct`.
-* The Agent dials outward to the Coordinator and holds the connection open.
-* The Client connects through it and all traffic relays.
-* Relay only to begin with. No hole punching yet.
+The goal in one sentence: once a Client is paired, the Agent is reachable from anywhere for
+as long as it is on and `borrow serve` is running, with no router change and no account.
 
-This is the hardest code in the project. Take the time. Read the Tailscale NAT traversal
-write up before starting.
+Built in this order, each step a working tool:
+
+1. **Path selection.** The Agent reports its addresses at pairing. The Client tries the
+   local address, then the tailnet address, uses the first that answers, and prints which.
+   ssh is told the Agent's name as `HostKeyAlias`, so the pinned host key matches whatever
+   address was dialed.
+2. **iroh identities.** The Agent and each Client get a persistent iroh key. Pairing swaps
+   the public halves, and the Agent records which Client keys may connect. `unlink` removes
+   the record.
+3. **The Agent endpoint.** `borrow serve` runs an iroh endpoint, accepts connections only
+   from recorded Client keys, and forwards each stream to its own sshd on loopback.
+4. **The Client tunnel.** A hidden `borrow internal-tunnel` is ssh's `ProxyCommand` when no
+   direct path answers. `run`, `attach`, sync, and control all use it with no other change.
+5. **Clear failures.** "archbox is not reachable, it may be off or asleep" is told apart
+   from an authentication failure, and `serve` warns when the Agent is set to suspend.
+6. **Acceptance** from a phone hotspot, including a forced relay, a network drop, and an
+   Agent reboot.
+
+**Completion rule.** With the Client on a phone hotspot and the Agent at home running only
+`borrow serve`, `run`, `attach`, and `sync` work and say which path they used.
 
 ## Phase 5: Polish
 
@@ -1023,13 +1059,15 @@ write up before starting.
 * Notifications for build finished, server up, job done, needs input.
 * Automatic port forwarding, so the Agent's port 3000 appears at `localhost:3000`.
 
-## Phase 6: Models, direct connections, reach
+## Phase 6: Models, pairing anywhere, reach
 
 **Status: not started.**
 
 * Wrap Ollama and ComfyUI as first class jobs, covering small LLMs, embeddings, Whisper,
   and image generation.
-* NAT hole punching, direct first with relay fallback.
+* Pairing across networks, using a password authenticated exchange so the short code
+  protects itself over a relay.
+* A setting for a self hosted iroh relay.
 * Harden Linux to Linux and remove any remaining Mac only assumptions.
 
 ## Phase 7: Ship it
@@ -1045,7 +1083,7 @@ and all of it is the difference between a repo and a project.
 * `borrow doctor`, one command that diagnoses a broken setup and names each fix. This is
   the single highest value thing you can give a stranger whose install did not work.
 * A README with the pitch, a five minute quickstart, and an honest security section that
-  states plainly that the Coordinator relays an encrypted stream and cannot read your code.
+  states plainly that relays carry an encrypted stream and cannot read your code.
 * A LICENSE, either MIT or Apache 2.0, plus CONTRIBUTING and issue templates.
 * CI building and testing on both platforms, and releasing binaries on tag.
 
@@ -1066,7 +1104,7 @@ have to answer by hand is a bug in the setup.
 | 3 | Source copies, persistent sessions, job control, and live health |
 | 4 | Works from anywhere, not just at home |
 | 5 | Feels polished: visible status, notifications, automatic ports |
-| 6 | Models, faster connections, more platforms |
+| 6 | Models, pairing from anywhere, more platforms |
 | 7 | A project other people can install, trust, and contribute to |
 
 ## The biggest risks
@@ -1076,8 +1114,9 @@ Naming these honestly is more useful than pretending they are solved.
 1. **Keeping two copies honest, in Phase 3.** Source copies are fast, but only safe if sync
    never loses an edit. Three way planning, conflict refusal, staged application, and
    recovery exist for exactly this, and they need real world testing.
-2. **NAT traversal, in Phase 4.** Connecting two home machines across networks is fiddly.
-   Doing relay only first avoids most of the pain.
+2. **Reachability, in Phase 4.** Connecting two home machines across networks is fiddly.
+   Wrapping iroh avoids writing NAT traversal, but it makes iroh's public relays a
+   dependency, and a sleeping Agent still looks like a hang unless the errors are good.
 3. **Scope creep.** This is not a remote desktop and not a RAM pooling tool. Stay in the
    lane of "run processes over there, files feel local."
 4. **Splitting the crate too early.** Four crates on day one means four manifests and a set
@@ -1095,9 +1134,9 @@ Naming these honestly is more useful than pretending they are solved.
 | **1** | `run`, pairing on the LAN, `info` and `health` | single crate: `ssh.rs`, `protocol.rs`, `telemetry.rs`, `agent.rs`, `commands/` |
 | **2** | Split to the workspace, then mount and artifact split | `core/mount.rs`, `core/stack.rs`, `core/config.rs`, `agent/mounts.rs` |
 | **3** | Source copies, `sync`, `attach`, `env`, `ps` and `stop`, live `health` and `top` | `core/source.rs`, `core/sync.rs`, `core/control.rs`, `agent/service.rs`, `agent/projects.rs`, `agent/jobs.rs`, `agent/runner.rs`, `cli/transfer.rs`, `cli/commands/` |
-| **4** | Cross network tunnel | the whole `borrow-coordinator` crate, plus networking in `core` |
+| **4** | Path selection and iroh | `core/config.rs`, `core/protocol.rs`, `core/tunnel.rs`, `agent/lib.rs`, `cli/ssh.rs`, `cli/commands/link.rs` |
 | **5** | Menu bar with live readout, notifications, port forwarding | `mac/menubar/`, forwarding logic in `core` and `cli` |
-| **6** | Models, hole punching, Linux to Linux | a new module wrapping Ollama and ComfyUI, `coordinator/relay.rs` |
+| **6** | Models, pairing across networks, Linux to Linux | a new module wrapping Ollama and ComfyUI |
 
 ---
 
@@ -1121,8 +1160,8 @@ an installer line, or a bug report from a future user. Nothing here is trivia.
 | Latency | n/a | roughly 4 ms over the tailnet |
 
 Reachability today is provided by Tailscale. That is scaffolding, so that Phases 1 through 3
-can be built while away from home. It is not the product's answer to reachability. The
-Coordinator in Phase 4 is.
+can be built while away from home. It is not the product's answer to reachability. iroh in
+Phase 4 is.
 
 ## The ssh trust model
 
@@ -1456,9 +1495,11 @@ Nothing here is checked off yet beyond what section 3 records as complete.
 
 **Networking**
 
-* Same network, no coordinator needed. *(P1)*
-* Relay through a coordinator, which works across networks. *(P4)*
-* Direct connection with hole punching, for lower latency. *(P6)*
+* Same network, by local address. *(P1)*
+* Path selection: local address, then tailnet, then iroh, always printed. *(P4)*
+* iroh across networks, direct through NAT when possible, relayed otherwise. *(P4)*
+* Pairing across networks with a password authenticated exchange. *(P6)*
+* A self hosted relay setting. *(P6)*
 
 **Polish, what makes it demo worthy**
 
@@ -1495,8 +1536,8 @@ the `?` operator. Structs, enums, traits, and `match`. `std::process::Command` a
 **Concurrency, Phase 1 onward, and this is the real learning curve.** `async` and `await`.
 `tokio` tasks, `mpsc` channels, and `select!`. `clap` for the command line.
 
-**Networking, Phase 4, the hardest part.** `quinn` for QUIC and `rustls` for TLS. The
-concepts underneath: NAT, ports, TLS, and hole punching.
+**Networking, Phase 4.** The `iroh` endpoint API: endpoints, public key addresses, ALPN,
+and bidirectional streams. The concepts underneath: NAT, relays, QUIC, and hole punching.
 
 **An honest note.** The wall is async and tokio, not the basics. `borrow run` is the ideal
 place to hit that wall. Streaming two output pipes while watching for Ctrl-C is genuinely a
@@ -1519,7 +1560,8 @@ reused everywhere later.
 2. Measure sync time and build time for real Rust, Node, and Python projects.
 3. Close the Client mid build, sleep, reconnect, and reattach.
 4. Test Agent reboot recovery, file watchers in sessions, and multiple Clients.
-5. Apply split overrides from `borrow.toml`, then begin Phase 4.
+5. Apply split overrides from `borrow.toml`.
+6. Finish Phase 4, then accept it from a phone hotspot.
 
 ## Conventions
 
