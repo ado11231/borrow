@@ -70,7 +70,7 @@ pub fn render(name: &str, health: &Health, style: Style) -> String {
         let temperature = gpu
             .temperature_c
             .map(|value| {
-                let (label, tone) = rating(value as f64, 75.0, 85.0, ["Normal", "Warm", "Hot"]);
+                let (label, tone) = rating(value as f64, TEMPERATURE, ["Normal", "Warm", "Hot"]);
                 mark(format!("{value}°C  {label}"), tone, style)
             })
             .unwrap_or_else(|| "Unavailable".to_string());
@@ -106,21 +106,56 @@ fn mark(text: String, tone: Tone, style: Style) -> String {
     }
 }
 
-fn rating(value: f64, warning: f64, high: f64, labels: [&str; 3]) -> (&str, Tone) {
-    if value >= high {
-        (labels[2], Tone::Error)
-    } else if value >= warning {
-        (labels[1], Tone::Warning)
-    } else {
-        (labels[0], Tone::Good)
+/// Where a measurement becomes worth watching, then worth acting on. The menu bar uses the
+/// same limits, so a value it colors or notifies about matches what this command shows.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Limits {
+    pub warning: f64,
+    pub high: f64,
+}
+
+pub(crate) const LOAD: Limits = Limits {
+    warning: 70.0,
+    high: 90.0,
+};
+
+pub(crate) const MEMORY: Limits = Limits {
+    warning: 75.0,
+    high: 90.0,
+};
+
+pub(crate) const TEMPERATURE: Limits = Limits {
+    warning: 75.0,
+    high: 85.0,
+};
+
+impl Limits {
+    pub(crate) fn tone(self, value: f64) -> Tone {
+        if value >= self.high {
+            Tone::Error
+        } else if value >= self.warning {
+            Tone::Warning
+        } else {
+            Tone::Good
+        }
     }
+}
+
+fn rating(value: f64, limits: Limits, labels: [&str; 3]) -> (&str, Tone) {
+    let tone = limits.tone(value);
+    let label = match tone {
+        Tone::Error => labels[2],
+        Tone::Warning => labels[1],
+        _ => labels[0],
+    };
+    (label, tone)
 }
 
 fn load(percent: f64, style: Style) -> String {
     if !percent.is_finite() || !(0.0..=100.0).contains(&percent) {
         return "Unavailable".to_string();
     }
-    let (label, tone) = rating(percent, 70.0, 90.0, ["Light", "Busy", "High load"]);
+    let (label, tone) = rating(percent, LOAD, ["Light", "Busy", "High load"]);
     mark(format!("{percent:.1}%  {label}"), tone, style)
 }
 
@@ -129,12 +164,7 @@ fn memory(used: u64, total: u64, style: Style) -> String {
         return "Unavailable".to_string();
     }
     let percent = used as f64 / total as f64 * 100.0;
-    let (label, tone) = rating(
-        percent,
-        75.0,
-        90.0,
-        ["Available", "Limited", "Low free memory"],
-    );
+    let (label, tone) = rating(percent, MEMORY, ["Available", "Limited", "Low free memory"]);
     mark(
         format!(
             "{} / {} used, {} free  {label}",
