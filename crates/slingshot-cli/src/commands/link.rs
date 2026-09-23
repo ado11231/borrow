@@ -100,6 +100,9 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
         "  Try it: {}",
         Style::stderr().paint("slingshot run uname -n", Tone::Info)
     );
+    if let Some(tip) = super::menubar::tip(&name) {
+        eprintln!("  {}", Style::stderr().dim(tip));
+    }
     eprintln!();
 
     Ok(0)

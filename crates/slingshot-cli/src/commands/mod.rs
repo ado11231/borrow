@@ -3,6 +3,7 @@ pub mod env;
 pub mod health;
 pub mod info;
 pub mod link;
+pub mod menubar;
 pub mod ps;
 pub mod run;
 pub mod sync;

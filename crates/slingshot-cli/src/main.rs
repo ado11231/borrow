@@ -149,6 +149,9 @@ enum Commands {
 
     #[command(about = "Live resource use with active Slingshot jobs")]
     Top,
+
+    #[command(about = "Show the box's live status in the macOS menu bar")]
+    Menubar,
 }
 
 #[derive(Subcommand)]
@@ -239,6 +242,7 @@ async fn main() {
         Commands::Info { refresh } => commands::info::info(cli.agent, refresh).await,
         Commands::Health { watch } => commands::health::health(cli.agent, watch).await,
         Commands::Top => commands::top::top(cli.agent).await,
+        Commands::Menubar => commands::menubar::menubar(cli.agent).await,
     };
 
     match result {
