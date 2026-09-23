@@ -42,6 +42,8 @@ pub struct RemoteCommand {
     pub host_key_alias: Option<String>,
     /// How ssh reaches the box when no address answers directly.
     pub proxy: Option<String>,
+    /// The socket ssh shares one connection through across calls, used over iroh.
+    pub shared: Option<PathBuf>,
     /// Whether to ask for a terminal on the box. See `wants_terminal`.
     pub tty: bool,
     pub program: String,
@@ -53,13 +55,18 @@ impl RemoteCommand {
     /// Everything ssh needs comes from the config, so nobody has to keep an entry in
     /// `~/.ssh/config` in step with this.
     pub fn to(agent: &config::Agent, program: String, args: Vec<String>) -> RemoteCommand {
-        let (host, proxy) = match route::resolve(agent) {
-            Route::Direct { host, .. } => (host, None),
-            Route::Iroh { key } => (agent.host.clone(), Some(tunnel::proxy_command(&key))),
+        let (host, proxy, shared) = match route::resolve(agent) {
+            Route::Direct { host, .. } => (host, None, None),
+            Route::Iroh { key } => (
+                agent.host.clone(),
+                Some(tunnel::proxy_command(&key)),
+                tunnel::shared_socket(&key),
+            ),
         };
         RemoteCommand {
             host,
             proxy,
+            shared,
             user: Some(agent.user.clone()),
             port: agent.port,
             identity_file: agent.identity_file.clone(),
@@ -114,6 +121,15 @@ impl RemoteCommand {
         if let Some(proxy) = &self.proxy {
             argv.push("-o".to_string());
             argv.push(format!("ProxyCommand={proxy}"));
+        }
+
+        if let Some(socket) = &self.shared {
+            argv.push("-o".to_string());
+            argv.push("ControlMaster=auto".to_string());
+            argv.push("-o".to_string());
+            argv.push(format!("ControlPath=\"{}\"", socket.display()));
+            argv.push("-o".to_string());
+            argv.push(format!("ControlPersist={}", tunnel::SHARED_FOR_SECONDS));
         }
 
         if let Some(alias) = &self.host_key_alias {
@@ -311,6 +327,7 @@ mod tests {
             known_hosts: None,
             host_key_alias: None,
             proxy: None,
+            shared: None,
             tty: false,
             program: "echo".to_string(),
             args: args.iter().map(|s| s.to_string()).collect(),
@@ -442,6 +459,27 @@ mod tests {
             "argv was: {argv:?}"
         );
         assert_eq!(argv[argv.len() - 2], "100.67.90.119");
+    }
+
+    #[test]
+    fn a_shared_connection_is_asked_for_only_when_there_is_a_socket() {
+        assert!(
+            !remote(&["hi"])
+                .to_ssh_args()
+                .iter()
+                .any(|arg| arg.starts_with("ControlMaster"))
+        );
+
+        let mut command = remote(&["hi"]);
+        command.shared = Some(PathBuf::from("/tmp/borrow-me/ab.sock"));
+        let argv = command.to_ssh_args();
+
+        assert!(argv.contains(&"ControlMaster=auto".to_string()), "{argv:?}");
+        assert!(
+            argv.contains(&"ControlPath=\"/tmp/borrow-me/ab.sock\"".to_string()),
+            "{argv:?}"
+        );
+        assert!(argv.contains(&"ControlPersist=30".to_string()), "{argv:?}");
     }
 
     #[test]

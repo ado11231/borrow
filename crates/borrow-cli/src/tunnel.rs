@@ -7,7 +7,13 @@ use anyhow::Context;
 use borrow_core::tunnel::{self, ALPN};
 use iroh::Endpoint;
 use iroh::endpoint::{Connection, presets};
+use std::path::PathBuf;
 use tokio::io::{AsyncRead, AsyncWrite};
+
+/// How long a shared iroh connection outlives its last ssh call. Long enough to carry one
+/// command's control, sync, and run calls, short enough that a box that went away is
+/// noticed on the next command rather than minutes later.
+pub const SHARED_FOR_SECONDS: u32 = 30;
 
 /// The ProxyCommand line for reaching the Agent with iroh key `key`, which the route has
 /// already checked. ssh runs it through a shell after expanding its own `%` tokens, so
@@ -19,6 +25,28 @@ pub fn proxy_command(key: &str) -> String {
         .unwrap_or_else(|| "borrow".to_string());
     proxy_line(&exe, key)
 }
+
+/// Where ssh keeps the connection it shares between calls over iroh, so one command pays
+/// for the iroh handshake once. Kept in a private folder and named by the box's key, so
+/// each box gets its own. `None` when no folder fits or none can be made private, which
+/// only means no sharing.
+pub fn shared_socket(key: &str) -> Option<PathBuf> {
+    let user = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
+    let name = format!("{}.sock", &key[..key.len().min(12)]);
+    [std::env::temp_dir(), PathBuf::from("/tmp")]
+        .into_iter()
+        .map(|base| base.join(format!("borrow-{user}")))
+        .find(|dir| {
+            dir.join(&name).as_os_str().len() + SOCKET_SUFFIX < SOCKET_LIMIT
+                && borrow_core::storage::private_dir(dir).is_ok()
+        })
+        .map(|dir| dir.join(name))
+}
+
+/// The longest Unix socket path macOS accepts, and what ssh appends to the name while it
+/// creates the socket.
+const SOCKET_LIMIT: usize = 104;
+const SOCKET_SUFFIX: usize = 17;
 
 fn proxy_line(exe: &str, key: &str) -> String {
     shell_words::join([exe, "internal-tunnel", key]).replace('%', "%%")
@@ -80,6 +108,26 @@ mod tests {
         assert_eq!(
             proxy_line("/App 100%/borrow", "k"),
             "'/App 100%%/borrow' internal-tunnel k"
+        );
+    }
+
+    /// Unix sockets fail to bind past roughly 104 bytes of path on macOS.
+    #[test]
+    fn the_shared_socket_path_is_short_and_private() {
+        let key = SecretKey::generate().public().to_string();
+        let path = shared_socket(&key).unwrap();
+
+        assert!(
+            path.as_os_str().len() + SOCKET_SUFFIX < SOCKET_LIMIT,
+            "{}",
+            path.display()
+        );
+        let mode = std::fs::metadata(path.parent().unwrap())
+            .unwrap()
+            .permissions();
+        assert_eq!(
+            std::os::unix::fs::PermissionsExt::mode(&mode) & 0o777,
+            0o700
         );
     }
 
