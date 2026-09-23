@@ -83,8 +83,12 @@ impl Style {
         }
     }
 
+    /// Bold rather than colored, so color stays reserved for things that need attention.
     pub fn heading(self, text: impl std::fmt::Display) -> String {
-        self.paint(text, Tone::Info)
+        match self.color {
+            true => format!("\x1b[1m{text}\x1b[0m"),
+            false => text.to_string(),
+        }
     }
 
     pub fn status(self, text: impl std::fmt::Display, tone: Tone) -> String {

@@ -200,6 +200,12 @@ pub fn connected(step: Step, agent: &Agent) {
     ));
 }
 
+/// `request` with a spinner while it waits, for commands that print only the answer.
+pub async fn fetch(agent: &Agent, request: Request) -> anyhow::Result<Response> {
+    let _connecting = connecting(agent);
+    self::request(agent, request).await
+}
+
 /// Open a connection, send one request, and close it.
 pub async fn request(agent: &Agent, request: Request) -> anyhow::Result<Response> {
     let mut control = Control::connect(agent).await?;

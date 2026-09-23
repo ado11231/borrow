@@ -14,7 +14,7 @@ pub async fn info(agent: Option<String>, refresh: bool) -> anyhow::Result<i32> {
     let specs = match (refresh, &target.specs) {
         (false, Some(cached)) => cached.clone(),
         _ => {
-            let Response::Info(specs) = client::request(&target, Request::Info).await? else {
+            let Response::Info(specs) = client::fetch(&target, Request::Info).await? else {
                 return Err(unexpected());
             };
 
@@ -36,7 +36,7 @@ pub async fn info(agent: Option<String>, refresh: bool) -> anyhow::Result<i32> {
 }
 
 fn render(name: &str, host: &str, specs: &Specs, style: Style) -> String {
-    let mut output = format!("\n{}\n\n", style.heading(format!("Agent: {name} ({host})")));
+    let mut output = format!("\n{}  {}\n\n", style.heading(name), style.dim(host));
     output.push_str(&row("OS", &specs.os));
     output.push_str(&row("Kernel", &specs.kernel));
     output.push_str(&row(
@@ -93,7 +93,7 @@ mod tests {
             }],
         };
         let text = render("archbox", "archbox.local", &specs, Style::new(false));
-        assert!(text.contains("Agent: archbox (archbox.local)"));
+        assert!(text.contains("archbox  archbox.local"));
         assert!(text.contains("1.5 GiB"));
         assert!(text.contains("512.0 MiB"));
         assert!(text.contains("Tools        tmux"));

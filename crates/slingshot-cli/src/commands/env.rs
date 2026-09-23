@@ -1,6 +1,6 @@
 //! `slingshot env`: environment files kept on the Agent, outside source copies.
 
-use crate::client::{request, unexpected};
+use crate::client::{fetch, unexpected};
 use crate::project::{self, Local};
 use anyhow::Context;
 use slingshot_core::config::{Agent, Config};
@@ -39,7 +39,7 @@ pub async fn add(
 
     let config = Config::load()?;
     let (remote, local, id) = resolve(&config, agent)?;
-    request(
+    fetch(
         remote,
         Request::EnvAdd {
             project: id,
@@ -59,8 +59,7 @@ pub async fn add(
 pub async fn list(agent: Option<String>) -> anyhow::Result<i32> {
     let config = Config::load()?;
     let (remote, local, id) = resolve(&config, agent)?;
-    let Response::EnvironmentFiles(names) =
-        request(remote, Request::EnvList { project: id }).await?
+    let Response::EnvironmentFiles(names) = fetch(remote, Request::EnvList { project: id }).await?
     else {
         return Err(unexpected());
     };
@@ -85,7 +84,7 @@ pub async fn remove(agent: Option<String>, target: String) -> anyhow::Result<i32
     source::environment_target(&target)?;
     let config = Config::load()?;
     let (remote, local, id) = resolve(&config, agent)?;
-    request(
+    fetch(
         remote,
         Request::EnvRemove {
             project: id,

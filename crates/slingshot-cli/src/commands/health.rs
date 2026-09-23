@@ -11,7 +11,7 @@ pub async fn health(agent: Option<String>, watch: bool) -> anyhow::Result<i32> {
     let config = Config::load()?;
     let target = config.resolve(agent.as_deref())?;
     if !watch {
-        let Response::Health(health) = client::request(target, Request::Health).await? else {
+        let Response::Health(health) = client::fetch(target, Request::Health).await? else {
             return Err(unexpected());
         };
         print!("{}", render(&target.name, &health, Style::stdout()));
@@ -35,7 +35,7 @@ pub async fn fetch(control: &mut Control) -> anyhow::Result<Health> {
 }
 
 pub fn render(name: &str, health: &Health, style: Style) -> String {
-    let mut output = format!("\n{}\n\n", style.heading(format!("Agent: {name}")));
+    let mut output = format!("\n{}\n\n", style.heading(name));
     output.push_str(&row("CPU", load(health.cpu_percent as f64, style)));
     output.push_str(&row(
         "RAM",
@@ -56,10 +56,7 @@ pub fn render(name: &str, health: &Health, style: Style) -> String {
     }
     for (index, gpu) in health.gpus.iter().enumerate() {
         output.push('\n');
-        output.push_str(&row(
-            &format!("GPU {}", index + 1),
-            style.heading(&gpu.name),
-        ));
+        output.push_str(&row(&format!("GPU {}", index + 1), &gpu.name));
         let usage = gpu
             .utilization_percent
             .map(|value| load(value as f64, style))
@@ -74,7 +71,7 @@ pub fn render(name: &str, health: &Health, style: Style) -> String {
             .temperature_c
             .map(|value| {
                 let (label, tone) = rating(value as f64, 75.0, 85.0, ["Normal", "Warm", "Hot"]);
-                style.paint(format!("{value}°C  {label}"), tone)
+                mark(format!("{value}°C  {label}"), tone, style)
             })
             .unwrap_or_else(|| "Unavailable".to_string());
         output.push_str(&row("Temperature", temperature));
@@ -101,6 +98,14 @@ fn workspace(free_mib: u64, style: Style) -> String {
     }
 }
 
+/// Color only a value that needs attention. A healthy one stays plain.
+fn mark(text: String, tone: Tone, style: Style) -> String {
+    match tone {
+        Tone::Good => text,
+        tone => style.paint(text, tone),
+    }
+}
+
 fn rating(value: f64, warning: f64, high: f64, labels: [&str; 3]) -> (&str, Tone) {
     if value >= high {
         (labels[2], Tone::Error)
@@ -116,7 +121,7 @@ fn load(percent: f64, style: Style) -> String {
         return "Unavailable".to_string();
     }
     let (label, tone) = rating(percent, 70.0, 90.0, ["Light", "Busy", "High load"]);
-    style.paint(format!("{percent:.1}%  {label}"), tone)
+    mark(format!("{percent:.1}%  {label}"), tone, style)
 }
 
 fn memory(used: u64, total: u64, style: Style) -> String {
@@ -130,7 +135,7 @@ fn memory(used: u64, total: u64, style: Style) -> String {
         90.0,
         ["Available", "Limited", "Low free memory"],
     );
-    style.paint(
+    mark(
         format!(
             "{} / {} used, {} free  {label}",
             capacity(used),
@@ -138,6 +143,7 @@ fn memory(used: u64, total: u64, style: Style) -> String {
             capacity(total - used)
         ),
         tone,
+        style,
     )
 }
 
@@ -167,15 +173,15 @@ mod tests {
 
     #[test]
     fn usage_thresholds_include_the_boundary() {
-        for (value, status, code) in [
-            (69.0, "Light", 32),
-            (70.0, "Busy", 33),
-            (89.0, "Busy", 33),
-            (90.0, "High load", 31),
+        for (value, status, color) in [
+            (69.0, "Light", ""),
+            (70.0, "Busy", "\x1b[33m"),
+            (89.0, "Busy", "\x1b[33m"),
+            (90.0, "High load", "\x1b[31m"),
         ] {
             let text = load(value, Style::new(true));
             assert!(text.contains(status));
-            assert!(text.starts_with(&format!("\x1b[{code}m")));
+            assert!(text.starts_with(&format!("{color}{value:.1}%")), "{text}");
         }
         for invalid in [f64::NAN, f64::INFINITY, -1.0, 101.0] {
             assert_eq!(load(invalid, Style::new(true)), "Unavailable");
@@ -200,15 +206,15 @@ mod tests {
     #[test]
     fn temperature_thresholds() {
         let mut health = sample();
-        for (temperature, label, code) in [
-            (74, "Normal", 32),
-            (75, "Warm", 33),
-            (84, "Warm", 33),
-            (85, "Hot", 31),
+        for (temperature, label, color) in [
+            (74, "Normal", ""),
+            (75, "Warm", "\x1b[33m"),
+            (84, "Warm", "\x1b[33m"),
+            (85, "Hot", "\x1b[31m"),
         ] {
             health.gpus[0].temperature_c = Some(temperature);
             let output = render("archbox", &health, Style::new(true));
-            assert!(output.contains(&format!("\x1b[{code}m{temperature}°C  {label}")));
+            assert!(output.contains(&format!("  {color}{temperature}°C  {label}")));
         }
     }
 

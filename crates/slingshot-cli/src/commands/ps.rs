@@ -4,12 +4,13 @@ use crate::client::{self, unexpected};
 use slingshot_core::config::Config;
 use slingshot_core::control::{Job, JobKind, JobState, Request, Response};
 use slingshot_core::presentation::{self, Style, Tone};
+use slingshot_core::step;
 use slingshot_core::storage;
 
 pub async fn ps(agent: Option<String>, all: bool) -> anyhow::Result<i32> {
     let config = Config::load()?;
     let target = config.resolve(agent.as_deref())?;
-    let Response::Jobs(jobs) = client::request(target, Request::Jobs { all }).await? else {
+    let Response::Jobs(jobs) = client::fetch(target, Request::Jobs { all }).await? else {
         return Err(unexpected());
     };
     print!(
@@ -22,22 +23,23 @@ pub async fn ps(agent: Option<String>, all: bool) -> anyhow::Result<i32> {
 pub async fn stop(agent: Option<String>, id: String) -> anyhow::Result<i32> {
     let config = Config::load()?;
     let target = config.resolve(agent.as_deref())?;
-    presentation::progress(format!("Stopping {id} on {}", target.name));
+    let stopping = step::start(format!("Stopping {id} on {}", target.name));
     let Response::Job(job) = client::request(target, Request::Stop { job: id }).await? else {
         return Err(unexpected());
     };
-    presentation::success(format!(
-        "Stopped {} ({}). Source and build output were kept",
+    stopping.done(format!(
+        "Stopped {} ({})",
         job.command,
         storage::short_id(&job.id)
     ));
+    presentation::detail("Kept", "source and build output");
     Ok(0)
 }
 
 pub fn render(agent: &str, jobs: &[Job], all: bool, now: u64, style: Style) -> String {
     let heading = match all {
-        true => format!("Slingshot jobs on {agent}"),
-        false => format!("Active Slingshot jobs on {agent}"),
+        true => format!("Jobs on {agent}"),
+        false => format!("Active jobs on {agent}"),
     };
     let mut output = format!("{}\n", style.heading(heading));
     if jobs.is_empty() {
@@ -47,20 +49,21 @@ pub fn render(agent: &str, jobs: &[Job], all: bool, now: u64, style: Style) -> S
         });
         return output;
     }
-    output.push_str(&format!(
-        "  {:<8}  {:<7}  {:<16}  {:<16}  {:<9}  {}\n",
+    let header = format!(
+        "{:<8}  {:<7}  {:<16}  {:<16}  {:<9}  {}",
         "ID", "KIND", "STATE", "PROJECT", "STARTED", "COMMAND"
-    ));
+    );
+    output.push_str(&format!("  {}\n", style.dim(header)));
     for job in jobs {
         let kind = match job.kind {
             JobKind::Run => "Run",
             JobKind::Session => "Session",
         };
         let tone = match job.state {
-            JobState::Running => Tone::Good,
-            JobState::Completed | JobState::Ended => Tone::Info,
-            JobState::Stopped | JobState::Interrupted => Tone::Warning,
-            JobState::Failed => Tone::Error,
+            JobState::Running => Some(Tone::Good),
+            JobState::Completed | JobState::Ended => None,
+            JobState::Stopped | JobState::Interrupted => Some(Tone::Warning),
+            JobState::Failed => Some(Tone::Error),
         };
         let mut state = job.state.label().to_string();
         if let Some(code) = job.exit_code.filter(|_| job.state == JobState::Failed) {
@@ -77,7 +80,10 @@ pub fn render(agent: &str, jobs: &[Job], all: bool, now: u64, style: Style) -> S
             "  {:<8}  {:<7}  {}  {:<16}  {:<9}  {}\n",
             storage::short_id(&job.id),
             kind,
-            style.paint(format!("{state:<16}"), tone),
+            match tone {
+                Some(tone) => style.paint(format!("{state:<16}"), tone),
+                None => format!("{state:<16}"),
+            },
             project,
             ago(now.saturating_sub(job.started)),
             job.command
@@ -123,7 +129,7 @@ mod tests {
         failed.exit_code = Some(101);
         let jobs = vec![job(JobKind::Session, JobState::Running, 9_950), failed];
         let text = render("archbox", &jobs, true, 10_000, Style::new(false));
-        assert!(text.contains("Slingshot jobs on archbox"));
+        assert!(text.contains("Jobs on archbox"));
         assert!(text.contains(
             "1a2b3c4d  Session  Running           app               50s ago    cargo build --release"
         ));
