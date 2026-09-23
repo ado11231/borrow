@@ -1,6 +1,6 @@
 # Slingshot Project Status
 
-Last updated: September 22, 2026
+Last updated: September 23, 2026
 
 This document explains what Slingshot is, how the repository is organized, what we completed in each phase, and what comes next.
 
@@ -685,7 +685,25 @@ Status: Acceptance testing. See section 11c.
 
 ### Phase 5
 
-Add visible status, notifications, and automatic port forwarding.
+Status: In progress. Menu bar and notifications are built; automatic port forwarding, server up, and needs input notifications are not.
+
+What exists:
+
+1. `crates/slingshot-cli/src/watch/mod.rs` is the hidden `slingshot internal-watch`. It keeps one control connection, polls `Health` every two seconds and `Jobs` every four, reconnects with a backoff of 2, 5, 15, then 30 seconds, probes the path again after losing the box, and reloads the configuration each time. It exits when its input closes.
+
+2. `watch/event.rs` defines the JSON lines, version 1: a `status` line with values and a good, warning, or high level for each, and a `notice` line with a title and body.
+
+3. `watch/state.rs` decides notifications. The first job list only sets a baseline. A run of ten seconds or more that completes or fails is told once, interrupted jobs are always told, and stopped runs and ended sessions stay quiet. Two failed checks in a row mean unreachable, told once, then back. RAM, workspace disk, and GPU temperature warn once when they cross the high limit and re-arm only after recovering. The limits are the ones `slingshot health` uses, shared from `commands/health.rs`.
+
+4. `commands/menubar.rs` is `slingshot menubar`. On macOS it saves this program's path in the app's settings, because an app opened at login has no shell PATH, and opens the app. Elsewhere it says the menu bar is macOS only. `link` ends with a tip about it on macOS.
+
+5. `mac/menubar/` is the SwiftUI app: a `MenuBarExtra` panel with graphs and bars, `UserNotifications` for banners, and `SMAppService` to start at login, turned on at first launch. `build.sh` builds it, signs it ad hoc, and installs it in `~/Applications`.
+
+Verified on September 23, 2026: the new tests pass; `internal-watch` reached archbox via iroh and printed status lines every two seconds, then exited when its input closed; the app built, installed, opened with `slingshot menubar`, started its helper, and was registered as an enabled login item. archbox then stopped answering, which the helper reported as offline, and the menu bar showed offline.
+
+After archbox was turned on and `slingshot start` run there, the menu bar switched to live numbers without restarting the app or pairing again. The panel showed archbox via the local network, CPU, RAM, the RTX 4060's use and temperature, VRAM, and workspace space. `slingshot run sh -c 'sleep 12; exit 3'` produced one failure banner once notifications were allowed in System Settings, and `slingshot run echo hi` produced none.
+
+Not yet verified: the back notification, resource warnings, and behavior across a log out and log in. On the first install, banners appeared only after notifications were turned on for Slingshot in System Settings. Whether the permission prompt showed is not recorded, so a clear first run prompt still needs checking.
 
 ### Phase 6
 
@@ -699,7 +717,7 @@ Prepare public releases, installers, packages, diagnostics, licensing, contribut
 
 Verified on September 22, 2026.
 
-The full Rust workspace builds successfully. All 183 automated tests pass, and formatting checks and Clippy pass. The Phase 3 flows were accepted on a real Mac Client and Arch Linux Agent, recorded in section 11. The Phase 4 checks run on those two machines are recorded in section 11c. The full Phase 3 flows have not yet been run again over iroh.
+The full Rust workspace builds successfully. All 196 automated tests pass, and formatting checks and Clippy pass. The Phase 3 flows were accepted on a real Mac Client and Arch Linux Agent, recorded in section 11. The Phase 4 checks run on those two machines are recorded in section 11c. The full Phase 3 flows have not yet been run again over iroh.
 
 The tests cover:
 

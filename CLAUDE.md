@@ -205,7 +205,8 @@ Each phase must leave a working, usable tool. Phase 4 gates publishing, because 
 
 ## Current state
 
-**Phases 1 and 3 are complete. Phase 4 is in acceptance testing.** Phase 3 replaced Phase 2's SSHFS execution with filtered
+**Phases 1 and 3 are complete. Phase 4 is in acceptance testing. Phase 5 is in progress:
+the menu bar app and notifications are built, port forwarding is not.** Phase 3 replaced Phase 2's SSHFS execution with filtered
 source copies and kept its stack detection and artifact split.
 
 The rename from borrow to Slingshot changed folders, the ssh key name, and the iroh protocol
@@ -229,7 +230,12 @@ RAM, GPU, and VRAM labels use uppercase. Global `--color auto|always|never` cont
 Slingshot output. Put Slingshot options before `run`; later arguments belong to the remote
 command.
 
-The current suite contains 183 passing tests, and formatting and Clippy pass. The Phase 3
+The menu bar app in `mac/menubar/` is SwiftUI and only draws what the hidden
+`slingshot internal-watch` prints as JSON lines. Keep thresholds and notification rules in
+`slingshot-cli/src/watch/`, never in Swift. `slingshot menubar` opens it, and
+`mac/menubar/build.sh` builds and installs it.
+
+The current suite contains 196 passing tests, and formatting and Clippy pass. The Phase 3
 flows were accepted on a real Mac Client and Arch Linux Agent, including a network drop
 mid build, a daemon restart, and an Agent reboot. Phase 4 was checked on the same two
 machines: `run` via the local network, the tailnet, and iroh from a phone hotspot, the

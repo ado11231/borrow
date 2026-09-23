@@ -641,8 +641,7 @@ not when you imagine they might.
 | Process groups and signals | `libc` | In use |
 | QUIC transport | `quinn` | Phase 4 |
 | TLS | `rustls` | Phase 4 |
-| Notifications | `notify-rust` or `mac-notification-sys` | Phase 5 |
-| Menu bar | `tray-icon`, with `tao` and `muda` | Phase 5 |
+| Menu bar and notifications | A SwiftUI app in `mac/menubar/`, using `MenuBarExtra`, `UserNotifications`, and `ServiceManagement` | In progress |
 
 Always check the current version on crates.io before adding a dependency. Do not assume.
 
@@ -1055,11 +1054,22 @@ Built in this order, each step a working tool:
 
 ## Phase 5: Polish
 
-**Status: not started.**
+**Status: in progress.**
 
-* Menu bar indicator with a live health readout.
-* Notifications for build finished, server up, job done, needs input.
+* Menu bar indicator with a live health readout. *Built:* `mac/menubar/` is a small SwiftUI
+  app with a panel of live CPU, RAM, GPU, VRAM, and workspace numbers, with two minute
+  graphs, the box, and the path in use.
+* Notifications. *Built:* a long run finishing or failing, an interrupted job, the box
+  becoming unreachable and coming back, and RAM, workspace disk, or GPU temperature
+  crossing the high limit. Server up and needs input are still to do.
 * Automatic port forwarding, so the Agent's port 3000 appears at `localhost:3000`.
+
+The app is only a view. A hidden `slingshot internal-watch` keeps one control connection,
+polls `Health` every two seconds and `Jobs` every four, and prints JSON lines with the
+numbers, their levels, and the notifications that are due. Every threshold and every
+decision to notify lives in Rust, and the Agent needed no change. `slingshot menubar`
+saves the program path for the app and opens it, and the app registers itself to start at
+login the first time it runs. Build and install it with `mac/menubar/build.sh`.
 
 ## Phase 6: Models, pairing anywhere, reach
 
