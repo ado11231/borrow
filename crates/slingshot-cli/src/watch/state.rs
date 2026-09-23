@@ -1,15 +1,14 @@
-//! Deciding when something is worth a notification. Each observation of the box goes in,
-//! and the notices it earns come out, so the rules can be tested without a box.
+//! Deciding when something is worth a notification, and saying it the way a person would.
+//! Each observation of the box goes in, and the notices it earns come out, so the rules
+//! can be tested without a box.
 
-use super::event::{Notice, NoticeKind};
+use super::event::{self, Machine, Notice, NoticeKind};
 use crate::commands::health::{MEMORY, TEMPERATURE};
 use slingshot_core::control::{Job, JobKind, JobState};
-use slingshot_core::presentation::capacity;
+use slingshot_core::presentation::{capacity, plural};
 use slingshot_core::protocol::Health;
-use slingshot_core::step;
 use slingshot_core::telemetry::DISK_WARNING_MIB;
 use std::collections::HashSet;
-use std::time::Duration;
 
 /// A run shorter than this finished while you were still looking at it.
 const WORTH_NOTICING: u64 = 10;
@@ -59,8 +58,8 @@ impl Watch {
         self.failures
     }
 
-    /// The box answered.
-    pub fn reached(&mut self) -> Vec<Notice> {
+    /// The box answered, over the path named `path`.
+    pub fn reached(&mut self, path: &str) -> Vec<Notice> {
         self.failures = 0;
         if !std::mem::take(&mut self.unreachable) {
             return Vec::new();
@@ -68,21 +67,36 @@ impl Watch {
         vec![Notice {
             kind: NoticeKind::Back,
             title: format!("{} is back", self.name),
-            body: "Slingshot can reach it again".to_string(),
+            subtitle: None,
+            body: format!("Connected via {path}."),
         }]
     }
 
-    /// The box did not answer, for the reason in `error`.
+    /// The box did not answer, for the reason in `error`. The notice uses the same plain
+    /// words as the offline screen rather than the raw error.
     pub fn failed(&mut self, error: &str) -> Vec<Notice> {
         self.failures += 1;
         if self.unreachable || self.failures < FAILURES_BEFORE_UNREACHABLE {
             return Vec::new();
         }
         self.unreachable = true;
+        let problem = event::explain(&self.name, error);
+        let body = match problem.fix {
+            Some(fix) => format!(
+                "Run {} on {}.",
+                fix.command,
+                match fix.machine {
+                    Machine::Agent => self.name.as_str(),
+                    Machine::Client => "this machine",
+                }
+            ),
+            None => problem.detail,
+        };
         vec![Notice {
             kind: NoticeKind::Unreachable,
-            title: format!("{} is unreachable", self.name),
-            body: error.to_string(),
+            title: format!("{} went offline", self.name),
+            subtitle: Some(problem.title),
+            body,
         }]
     }
 
@@ -118,7 +132,11 @@ impl Watch {
             ) {
                 notices.push(resource(
                     format!("{} is low on memory", self.name),
-                    format!("{} of {} RAM in use", capacity(used), capacity(total)),
+                    format!(
+                        "{} of {} in use ({percent:.0}%).",
+                        capacity(used),
+                        capacity(total)
+                    ),
                 ));
             }
         }
@@ -130,10 +148,7 @@ impl Watch {
         ) {
             notices.push(resource(
                 format!("{} is low on disk space", self.name),
-                format!(
-                    "{} free for project copies and build output",
-                    capacity(free)
-                ),
+                format!("{} left for projects and build output.", capacity(free)),
             ));
         }
         for (index, gpu) in health.gpus.iter().enumerate() {
@@ -147,8 +162,8 @@ impl Watch {
                 value < TEMPERATURE.warning,
             ) {
                 notices.push(resource(
-                    format!("{}'s GPU is hot", self.name),
-                    format!("{} at {celsius}°C", gpu.name),
+                    format!("{}'s GPU is running hot", self.name),
+                    format!("{} is at {celsius}°C.", gpu.name),
                 ));
             }
         }
@@ -169,41 +184,70 @@ fn resource(title: String, body: String) -> Notice {
     Notice {
         kind: NoticeKind::Resource,
         title,
+        subtitle: None,
         body,
     }
 }
 
-/// What a finished job is worth saying. Stopping is something the person just did, and a
-/// session usually ends because someone left it, so only surprises about those are told.
+/// What a finished job is worth saying. The command is the subtitle, so the title can stay
+/// short and plain. Stopping is something the person just did, and a session usually ends
+/// because someone left it, so only surprises about those are told.
 fn notice(name: &str, job: &Job) -> Option<Notice> {
     let took = job.ended?.saturating_sub(job.started);
-    let command = short(&job.command);
-    let details = |first: Option<String>| {
-        first
-            .into_iter()
-            .chain(job.project_name.clone())
-            .chain(Some(step::elapsed(Duration::from_secs(took))))
-            .collect::<Vec<_>>()
-            .join(" · ")
+    let place = job
+        .project_name
+        .as_ref()
+        .map(|project| format!(" in {project}"))
+        .unwrap_or_default();
+    let what = match job.kind {
+        JobKind::Run => short(&job.command),
+        JobKind::Session => "Session".to_string(),
     };
-    match (job.kind, job.state) {
-        (_, JobState::Interrupted) => Some(Notice {
-            kind: NoticeKind::JobInterrupted,
-            title: format!("{command} was interrupted on {name}"),
-            body: details(Some("Connection lost or the box restarted".to_string())),
-        }),
-        (JobKind::Run, _) if took < WORTH_NOTICING => None,
-        (JobKind::Run, JobState::Completed) => Some(Notice {
-            kind: NoticeKind::JobFinished,
-            title: format!("✓ {command} finished on {name}"),
-            body: details(None),
-        }),
-        (JobKind::Run, JobState::Failed) => Some(Notice {
-            kind: NoticeKind::JobFailed,
-            title: format!("✗ {command} failed on {name}"),
-            body: details(job.exit_code.map(|code| format!("exit {code}"))),
-        }),
-        _ => None,
+    let (kind, title, body) = match (job.kind, job.state) {
+        (_, JobState::Interrupted) => (
+            NoticeKind::JobInterrupted,
+            format!("Interrupted on {name}"),
+            format!(
+                "Stopped after {}{place}. The connection dropped or {name} restarted.",
+                spoken(took)
+            ),
+        ),
+        (JobKind::Run, _) if took < WORTH_NOTICING => return None,
+        (JobKind::Run, JobState::Completed) => (
+            NoticeKind::JobFinished,
+            format!("Finished on {name}"),
+            format!("Took {}{place}.", spoken(took)),
+        ),
+        (JobKind::Run, JobState::Failed) => (
+            NoticeKind::JobFailed,
+            format!("Failed on {name}"),
+            match job.exit_code {
+                Some(code) => format!("Exit code {code} after {}{place}.", spoken(took)),
+                None => format!("Failed after {}{place}.", spoken(took)),
+            },
+        ),
+        _ => return None,
+    };
+    Some(Notice {
+        kind,
+        title,
+        subtitle: Some(what),
+        body,
+    })
+}
+
+/// `12 seconds`, `3 minutes`, or `1 hour 5 minutes`, as a sentence would say it.
+fn spoken(seconds: u64) -> String {
+    let (hours, minutes) = (seconds / 3600, seconds % 3600 / 60);
+    match (hours, minutes) {
+        (0, 0) => plural(seconds as usize, "second"),
+        (0, minutes) => plural(minutes as usize, "minute"),
+        (hours, 0) => plural(hours as usize, "hour"),
+        (hours, minutes) => format!(
+            "{} {}",
+            plural(hours as usize, "hour"),
+            plural(minutes as usize, "minute")
+        ),
     }
 }
 
@@ -287,11 +331,12 @@ mod tests {
         let notices = watch.jobs(&[run("a", JobState::Completed, 192)]);
         assert_eq!(notices.len(), 1);
         assert_eq!(notices[0].kind, NoticeKind::JobFinished);
+        assert_eq!(notices[0].title, "Finished on archbox");
         assert_eq!(
-            notices[0].title,
-            "✓ cargo build --release finished on archbox"
+            notices[0].subtitle.as_deref(),
+            Some("cargo build --release")
         );
-        assert_eq!(notices[0].body, "app · 3m 12s");
+        assert_eq!(notices[0].body, "Took 3 minutes in app.");
         assert!(watch.jobs(&[run("a", JobState::Completed, 192)]).is_empty());
     }
 
@@ -301,11 +346,8 @@ mod tests {
         watch.jobs(&[]);
         let notices = watch.jobs(&[run("a", JobState::Failed, 12)]);
         assert_eq!(notices[0].kind, NoticeKind::JobFailed);
-        assert_eq!(
-            notices[0].title,
-            "✗ cargo build --release failed on archbox"
-        );
-        assert_eq!(notices[0].body, "exit 101 · app · 12s");
+        assert_eq!(notices[0].title, "Failed on archbox");
+        assert_eq!(notices[0].body, "Exit code 101 after 12 seconds in app.");
     }
 
     #[test]
@@ -338,7 +380,12 @@ mod tests {
                 .iter()
                 .all(|notice| notice.kind == NoticeKind::JobInterrupted)
         );
-        assert!(notices[0].title.ends_with("was interrupted on archbox"));
+        assert_eq!(notices[0].title, "Interrupted on archbox");
+        assert_eq!(notices[0].subtitle.as_deref(), Some("Session"));
+        assert_eq!(
+            notices[1].body,
+            "Stopped after 1 second in app. The connection dropped or archbox restarted."
+        );
     }
 
     #[test]
@@ -350,25 +397,49 @@ mod tests {
     }
 
     #[test]
+    fn durations_are_spoken() {
+        assert_eq!(spoken(1), "1 second");
+        assert_eq!(spoken(48), "48 seconds");
+        assert_eq!(spoken(192), "3 minutes");
+        assert_eq!(spoken(3600), "1 hour");
+        assert_eq!(spoken(3900), "1 hour 5 minutes");
+    }
+
+    #[test]
     fn unreachable_needs_two_failures_and_is_told_once_then_back() {
+        let refused = "Could not reach archbox: Slingshot is not running on the Agent. Run slingshot start there: Connection refused (os error 111)";
         let mut watch = Watch::new("archbox");
-        assert!(watch.reached().is_empty());
-        assert!(watch.failed("timed out").is_empty());
-        let notices = watch.failed("timed out");
+        assert!(watch.reached("local network").is_empty());
+        assert!(watch.failed(refused).is_empty());
+        let notices = watch.failed(refused);
         assert_eq!(notices[0].kind, NoticeKind::Unreachable);
-        assert_eq!(notices[0].title, "archbox is unreachable");
-        assert_eq!(notices[0].body, "timed out");
-        assert!(watch.failed("timed out").is_empty());
-        let notices = watch.reached();
+        assert_eq!(notices[0].title, "archbox went offline");
+        assert_eq!(
+            notices[0].subtitle.as_deref(),
+            Some("Slingshot isn't running on archbox")
+        );
+        assert_eq!(notices[0].body, "Run slingshot start on archbox.");
+        assert!(watch.failed(refused).is_empty());
+        let notices = watch.reached("tailnet");
         assert_eq!(notices[0].kind, NoticeKind::Back);
-        assert!(watch.reached().is_empty());
+        assert_eq!(notices[0].body, "Connected via tailnet.");
+        assert!(watch.reached("tailnet").is_empty());
+    }
+
+    #[test]
+    fn an_offline_cause_without_a_fix_explains_itself() {
+        let mut watch = Watch::new("archbox");
+        watch.failed("something new");
+        let notices = watch.failed("something new");
+        assert_eq!(notices[0].subtitle.as_deref(), Some("Can't reach archbox"));
+        assert_eq!(notices[0].body, "something new");
     }
 
     #[test]
     fn one_failure_between_answers_is_not_an_outage() {
         let mut watch = Watch::new("archbox");
         watch.failed("slow");
-        watch.reached();
+        watch.reached("local network");
         assert!(watch.failed("slow").is_empty());
     }
 
@@ -379,6 +450,7 @@ mod tests {
         let notices = watch.health(&health(95, PLENTY, 60));
         assert_eq!(notices.len(), 1);
         assert_eq!(notices[0].title, "archbox is low on memory");
+        assert_eq!(notices[0].body, "95.0 MiB of 100.0 MiB in use (95%).");
         assert!(watch.health(&health(95, PLENTY, 60)).is_empty());
         assert!(watch.health(&health(80, PLENTY, 60)).is_empty());
         assert!(watch.health(&health(92, PLENTY, 60)).is_empty());
@@ -393,8 +465,16 @@ mod tests {
         let titles: Vec<_> = notices.iter().map(|notice| notice.title.as_str()).collect();
         assert_eq!(
             titles,
-            ["archbox is low on disk space", "archbox's GPU is hot"]
+            [
+                "archbox is low on disk space",
+                "archbox's GPU is running hot"
+            ]
         );
+        assert_eq!(
+            notices[0].body,
+            "1.0 GiB left for projects and build output."
+        );
+        assert_eq!(notices[1].body, "RTX 3090 is at 90°C.");
         assert!(watch.health(&health(10, DISK_WARNING_MIB, 80)).is_empty());
         assert!(watch.health(&health(10, 1024, 90)).is_empty());
         assert!(watch.health(&health(10, DISK_RECOVERED_MIB, 70)).is_empty());

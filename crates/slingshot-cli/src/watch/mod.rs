@@ -109,7 +109,7 @@ async fn session(agent: Option<&str>, watch: &mut Option<Watch>) -> anyhow::Resu
                 anyhow::bail!("{} did not answer in time", target.name);
             }
         };
-        let mut notices = watch.reached();
+        let mut notices = watch.reached(path);
         notices.extend(watch.health(&health));
         if let Some(jobs) = jobs {
             notices.extend(watch.jobs(&jobs));

@@ -116,6 +116,9 @@ impl Level {
 pub struct Notice {
     pub kind: NoticeKind,
     pub title: String,
+    /// A second line under the title, such as the command that finished.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
     pub body: String,
 }
 
@@ -399,6 +402,7 @@ mod tests {
         let event = Event::Notice(Notice {
             kind: NoticeKind::JobFinished,
             title: "t".to_string(),
+            subtitle: None,
             body: "b".to_string(),
         });
         let text = serde_json::to_string(&Line {
