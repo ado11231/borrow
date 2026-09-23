@@ -220,13 +220,16 @@ pairing message, so a config file written before that no longer loads and the ma
 run `slingshot link` again. The control protocol is at version 5, raised when unlink began
 naming the Client so the Agent can forget its iroh key.
 
-CLI output uses shared formatting in `slingshot-core/src/presentation.rs`. Messages use
-sentence capitalization. CPU, RAM, GPU, and VRAM labels use uppercase. Colors have text
-labels and respect terminal detection. Global `--color auto|always|never` controls
+CLI output uses shared formatting in `slingshot-core/src/presentation.rs` and
+`slingshot-core/src/step.rs`. Anything that waits is a step: a spinner on a terminal, then
+`✓ text  0.4s`. Status symbols are `✓`, `!`, `✗`, and `▶`. Color is for what needs attention:
+symbols, the box and path in `▶` lines, and warning or failed values. Healthy values stay
+plain, headings are bold, and details are dim. Messages use sentence capitalization. CPU,
+RAM, GPU, and VRAM labels use uppercase. Global `--color auto|always|never` controls
 Slingshot output. Put Slingshot options before `run`; later arguments belong to the remote
 command.
 
-The current suite contains 179 passing tests, and formatting and Clippy pass. The Phase 3
+The current suite contains 183 passing tests, and formatting and Clippy pass. The Phase 3
 flows were accepted on a real Mac Client and Arch Linux Agent, including a network drop
 mid build, a daemon restart, and an Agent reboot. Phase 4 was checked on the same two
 machines: `run` via the local network, the tailnet, and iroh from a phone hotspot, the

@@ -673,6 +673,10 @@ Optionally run `sync --pull`, a network drop mid build, and an Agent reboot over
 
 On September 22, 2026 the project was renamed from borrow to Slingshot, and `serve` became `start`. The crates, the command, the config and data folders, the ssh key, the iroh protocol name, and environment variables all changed. Nothing is migrated: after updating, start the Agent and run `slingshot link` again. The old `borrow` folders can be deleted by hand.
 
+### Output redesign
+
+Also on September 22, 2026, output moved to one style. Connecting, syncing, pairing, and stopping are steps: a spinner while they run, then a checked line with the time taken. `run` ends with its total time and exit code. Color marks only symbols, the box and path, and values that need attention, so a warning stands out. Checked on the real Mac and archbox with `run`, `ps`, `info`, `health`, and `env list`. The spinners themselves were only seen in an interactive terminal by hand.
+
 ## 12. Later Phases
 
 ### Phase 4
@@ -695,7 +699,7 @@ Prepare public releases, installers, packages, diagnostics, licensing, contribut
 
 Verified on September 22, 2026.
 
-The full Rust workspace builds successfully. All 179 automated tests pass, and formatting checks and Clippy pass. The Phase 3 flows were accepted on a real Mac Client and Arch Linux Agent, recorded in section 11. The Phase 4 checks run on those two machines are recorded in section 11c. The full Phase 3 flows have not yet been run again over iroh.
+The full Rust workspace builds successfully. All 183 automated tests pass, and formatting checks and Clippy pass. The Phase 3 flows were accepted on a real Mac Client and Arch Linux Agent, recorded in section 11. The Phase 4 checks run on those two machines are recorded in section 11c. The full Phase 3 flows have not yet been run again over iroh.
 
 The tests cover:
 
