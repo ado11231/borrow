@@ -655,9 +655,19 @@ Verified on September 22, 2026 between the Mac Client and archbox, after re-pair
 
 5. A Client key that never paired was refused, and a paired one reached sshd, tested on one machine against iroh's live relays.
 
+6. `borrow sync` and `borrow attach` with detach and reattach worked via iroh from the hotspot with Tailscale off.
+
+### Follow ups found during acceptance
+
+1. `borrow attach` works but feels unclear, messy, and not responsive. The user asked for this to be reworked later rather than now. Whether the lag comes from iroh or from the session itself is not yet measured.
+
+2. `borrow serve` does not start by itself after the Agent reboots, so the Agent is unreachable until someone logs in and runs it. Installing it as a service that starts at boot is planned, currently listed under Phase 7.
+
+3. `hostname` inside a session failed because a clean Arch install does not include it. This is not a Borrow fault, but instructions should use `uname -n`.
+
 ### Still to do
 
-Run the Phase 3 flows over iroh: `sync`, `sync --pull`, `attach` with detach and reattach, a network drop mid build, and an Agent reboot. Confirm that the lock disappears when `serve` stops. Pairing across networks and a self hosted relay setting are Phase 6.
+Optionally run `sync --pull`, a network drop mid build, and an Agent reboot over iroh, and confirm that the lock disappears when `serve` stops. Pairing across networks and a self hosted relay setting are Phase 6.
 
 ## 12. Later Phases
 
