@@ -84,7 +84,6 @@ mod tests {
     use super::*;
     use crate::testing::Root;
     use iroh::RelayMode;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
     async fn endpoint(alpns: Vec<Vec<u8>>) -> Endpoint {
@@ -128,8 +127,7 @@ mod tests {
         let (mut send, mut recv) = connection.open_bi().await.unwrap();
         send.write_all(b"SSH-2.0-test\r\n").await.unwrap();
         send.finish().unwrap();
-        let mut echoed = Vec::new();
-        recv.read_to_end(&mut echoed).await.unwrap();
+        let echoed = recv.read_to_end(1024).await.unwrap();
 
         assert_eq!(echoed, b"SSH-2.0-test\r\n");
     }

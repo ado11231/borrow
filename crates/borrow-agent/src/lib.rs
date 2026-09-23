@@ -14,7 +14,6 @@ use borrow_core::network::Network;
 use borrow_core::preflight;
 use borrow_core::protocol::{Paired, Request, Response};
 use borrow_core::telemetry;
-use borrow_core::tunnel;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -67,7 +66,7 @@ pub async fn serve(name: Option<String>, port: u16) -> anyhow::Result<i32> {
 
     let _service = service::start(name.clone())?;
     let root = service::root()?;
-    let identity = tunnel::identity(&root)?;
+    let identity = borrow_core::tunnel::identity(&root)?;
     let user = whoami().context("Could not work out which user is running the daemon")?;
     let token = new_token();
     let addresses = bind_addresses(port);
@@ -87,6 +86,8 @@ pub async fn serve(name: Option<String>, port: u16) -> anyhow::Result<i32> {
             expires: Instant::now() + CODE_LIFETIME,
         })),
     });
+
+    let endpoint = tunnel::start(identity, agent.root.clone()).await?;
 
     announce(&name, &addresses, &token);
 
@@ -108,10 +109,23 @@ pub async fn serve(name: Option<String>, port: u16) -> anyhow::Result<i32> {
         tasks.push(tokio::spawn(accept_loop(listener, agent)));
     }
 
+    tokio::spawn(report_reach(endpoint.clone()));
+
     tokio::signal::ctrl_c().await.ok();
     eprintln!("\nStopping");
+    endpoint.close().await;
 
     Ok(0)
+}
+
+/// Say once whether other networks can reach this box. The same network works either way.
+async fn report_reach(endpoint: iroh::Endpoint) {
+    match tunnel::online(&endpoint).await {
+        true => borrow_core::presentation::success("Reachable from other networks through iroh"),
+        false => borrow_core::presentation::warning(
+            "No iroh relay answered, so other networks cannot reach this box yet. The same network still works, and Borrow keeps trying",
+        ),
+    }
 }
 
 /// Take connections forever, one task each, so a slow Client never blocks another.
