@@ -1,0 +1,145 @@
+//! `slingshot internal-watch`: keeps one control connection to the box and prints what the
+//! menu bar app shows and notifies, one JSON line at a time. The app starts it and closes
+//! its input to stop it, so it never outlives the app.
+
+pub mod event;
+pub mod state;
+
+use crate::client::{Control, unexpected};
+use crate::route;
+use event::{Event, Line, Status, VERSION};
+use slingshot_core::config::Config;
+use slingshot_core::control::{Request, Response};
+use state::Watch;
+use std::convert::Infallible;
+use std::io::Write;
+use std::time::Duration;
+
+/// How often the popover's numbers move.
+const HEALTH_EVERY: Duration = Duration::from_secs(2);
+
+/// Jobs are checked on every second health tick, which is soon enough for a notification.
+const JOBS_EVERY_TICKS: u32 = 2;
+
+const TICK_LIMIT: Duration = Duration::from_secs(15);
+
+/// Waits between attempts while the box is unreachable, longest last.
+const BACKOFF: [Duration; 4] = [
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+    Duration::from_secs(15),
+    Duration::from_secs(30),
+];
+
+pub async fn run(agent: Option<String>) -> anyhow::Result<i32> {
+    std::thread::spawn(|| {
+        let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+        std::process::exit(0);
+    });
+
+    let mut watch: Option<Watch> = None;
+    let mut unconfigured = 0;
+    loop {
+        let Err(error) = session(agent.as_deref(), &mut watch).await;
+        let message = format!("{error:#}");
+        let failures = match &mut watch {
+            Some(watch) => {
+                emit(&Event::Status(Status::offline(
+                    watch.name(),
+                    message.clone(),
+                )));
+                for notice in watch.failed(&message) {
+                    emit(&Event::Notice(notice));
+                }
+                watch.failures()
+            }
+            None => {
+                emit(&Event::Status(Status::offline("", message)));
+                unconfigured += 1;
+                unconfigured
+            }
+        };
+        route::forget();
+        let wait = BACKOFF[(failures as usize).saturating_sub(1).min(BACKOFF.len() - 1)];
+        tokio::time::sleep(wait).await;
+    }
+}
+
+/// One connection's worth of watching. It returns only when the box stops answering, and
+/// the caller reconnects. Configuration is read again each time, so linking or unlinking
+/// takes effect without restarting the app.
+async fn session(agent: Option<&str>, watch: &mut Option<Watch>) -> anyhow::Result<Infallible> {
+    let config = Config::load()?;
+    let target = config.resolve(agent)?;
+    if watch
+        .as_ref()
+        .is_none_or(|watch| watch.name() != target.name)
+    {
+        *watch = Some(Watch::new(&target.name));
+    }
+    let watch = watch.as_mut().expect("watch was just set");
+    let mut control = Control::connect(target).await?;
+    let path = route::resolve(target).name();
+    let mut ticks = 0u32;
+    loop {
+        let jobs = ticks.is_multiple_of(JOBS_EVERY_TICKS);
+        let answer = tokio::time::timeout(TICK_LIMIT, poll(&mut control, jobs)).await;
+        let (health, jobs) = match answer {
+            Ok(Ok(answer)) => answer,
+            Ok(Err(error)) => {
+                control.close().await;
+                return Err(error);
+            }
+            Err(_) => {
+                control.close().await;
+                anyhow::bail!("{} did not answer in time", target.name);
+            }
+        };
+        let mut notices = watch.reached();
+        notices.extend(watch.health(&health));
+        if let Some(jobs) = jobs {
+            notices.extend(watch.jobs(&jobs));
+        }
+        emit(&Event::Status(Status::online(&target.name, path, &health)));
+        for notice in notices {
+            emit(&Event::Notice(notice));
+        }
+        ticks = ticks.wrapping_add(1);
+        tokio::time::sleep(HEALTH_EVERY).await;
+    }
+}
+
+async fn poll(
+    control: &mut Control,
+    jobs: bool,
+) -> anyhow::Result<(
+    slingshot_core::protocol::Health,
+    Option<Vec<slingshot_core::control::Job>>,
+)> {
+    let Response::Health(health) = control.call(Request::Health).await? else {
+        return Err(unexpected());
+    };
+    if !jobs {
+        return Ok((health, None));
+    }
+    let Response::Jobs(jobs) = control.call(Request::Jobs { all: true }).await? else {
+        return Err(unexpected());
+    };
+    Ok((health, Some(jobs)))
+}
+
+/// A closed pipe means the app is gone, so there is nobody left to watch for.
+fn emit(event: &Event) {
+    let line = Line {
+        version: VERSION,
+        event,
+    };
+    let mut out = std::io::stdout().lock();
+    let written = serde_json::to_writer(&mut out, &line)
+        .map_err(std::io::Error::from)
+        .and_then(|()| out.write_all(b"\n"))
+        .and_then(|()| out.flush());
+    if written.is_err() {
+        std::process::exit(0);
+    }
+}

@@ -9,6 +9,7 @@ mod route;
 mod ssh;
 mod transfer;
 mod tunnel;
+mod watch;
 
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use slingshot_core::presentation::{self, ColorMode, Style, Tone};
@@ -51,6 +52,10 @@ enum Commands {
     /// ssh's ProxyCommand when the Agent is reached over iroh.
     #[command(hide = true)]
     InternalTunnel { key: String },
+
+    /// Prints the menu bar app's numbers and notifications as JSON lines until input closes.
+    #[command(hide = true)]
+    InternalWatch,
 
     /// The remote shell rsync uses, with Slingshot's saved SSH options.
     #[command(hide = true)]
@@ -211,6 +216,7 @@ async fn main() {
         }
         Commands::InternalRsh { args } => internal_rsh(args),
         Commands::InternalTunnel { key } => tunnel::run(key).await,
+        Commands::InternalWatch => watch::run(cli.agent).await,
         Commands::Start { name, port } => slingshot_agent::start(name, port).await,
         Commands::Link { code, name } => commands::link::link(code, name).await,
         Commands::Unlink => commands::unlink::unlink(cli.agent).await,

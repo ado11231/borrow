@@ -65,6 +65,12 @@ pub fn resolve(agent: &Agent) -> Route {
     route
 }
 
+/// Probe again on the next `resolve`. A process that outlives one network, such as the
+/// menu bar helper, calls this after losing the box so a new network gets a new path.
+pub fn forget() {
+    *CHOSEN.lock().expect("route lock was poisoned") = None;
+}
+
 /// Take the path a parent process already chose, from its `token`. Ignored unless it is
 /// one of the box's own paths.
 pub fn assume(agent: &Agent, token: &str) {
