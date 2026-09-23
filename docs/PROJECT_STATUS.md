@@ -697,7 +697,7 @@ What exists:
 
 4. `commands/menubar.rs` is `slingshot menubar`. On macOS it saves this program's path in the app's settings, because an app opened at login has no shell PATH, and opens the app. Elsewhere it says the menu bar is macOS only. `link` ends with a tip about it on macOS.
 
-5. `mac/menubar/` is the SwiftUI app: a `MenuBarExtra` panel with graphs and bars, `UserNotifications` for banners, and `SMAppService` to start at login, turned on at first launch. `build.sh` builds it, signs it ad hoc, and installs it in `~/Applications`.
+5. `mac/menubar/` is the SwiftUI app: an icon in the menu bar and a `MenuBarExtra` panel with CPU, RAM, GPU, and workspace sections drawn as colored bars, rows for Open at login and Quit, `UserNotifications` for banners, and `SMAppService` to start at login, turned on at first launch. `build.sh` builds it, signs it ad hoc, and installs it in `~/Applications`.
 
 Verified on September 23, 2026: the new tests pass; `internal-watch` reached archbox via iroh and printed status lines every two seconds, then exited when its input closed; the app built, installed, opened with `slingshot menubar`, started its helper, and was registered as an enabled login item. archbox then stopped answering, which the helper reported as offline, and the menu bar showed offline.
 
