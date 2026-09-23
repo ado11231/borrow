@@ -1,6 +1,7 @@
 //! The Agent daemon: pairing over TCP, plus the private control service used for
 //! everything after pairing. Work itself runs through SSH.
 
+pub mod awake;
 pub mod clients;
 pub mod jobs;
 pub mod projects;
@@ -90,6 +91,19 @@ pub async fn serve(name: Option<String>, port: u16) -> anyhow::Result<i32> {
     let endpoint = tunnel::start(identity, agent.root.clone()).await?;
 
     announce(&name, &addresses, &token);
+
+    let _awake = match awake::hold() {
+        Some(awake) => {
+            borrow_core::presentation::success("Keeping this machine awake while serving");
+            Some(awake)
+        }
+        None => {
+            borrow_core::presentation::warning(
+                "Could not stop this machine from sleeping. If it sleeps, other machines cannot reach it until it wakes",
+            );
+            None
+        }
+    };
 
     let mut listeners = Vec::new();
     for addr in &addresses {
