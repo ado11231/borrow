@@ -33,12 +33,36 @@ pub struct Status {
     pub online: bool,
     /// The path in use, as in "via tailnet".
     pub path: Option<String>,
+    /// The full error while offline, kept for anyone who wants the exact words.
     pub error: Option<String>,
+    /// The same failure in plain words, with the command that fixes it when there is one.
+    pub problem: Option<Problem>,
     pub cpu: Option<Percent>,
     pub memory: Option<Usage>,
     pub workspace: Option<Space>,
     pub gpus: Vec<Gpu>,
     pub gpu_problem: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Problem {
+    pub title: String,
+    pub detail: String,
+    pub fix: Option<Fix>,
+}
+
+/// A command to run, and which machine to run it on.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Fix {
+    pub machine: Machine,
+    pub command: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Machine {
+    Agent,
+    Client,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -113,6 +137,7 @@ impl Status {
             online: true,
             path: Some(path.to_string()),
             error: None,
+            problem: None,
             cpu: percent(health.cpu_percent as f64, LOAD),
             memory: usage(health.memory_used_mib, health.memory_total_mib),
             workspace: Some(space(
@@ -128,6 +153,7 @@ impl Status {
             agent: agent.to_string(),
             online: false,
             path: None,
+            problem: Some(explain(agent, &error)),
             error: Some(error),
             cpu: None,
             memory: None,
@@ -135,6 +161,65 @@ impl Status {
             gpus: Vec::new(),
             gpu_problem: None,
         }
+    }
+}
+
+/// Turn a connection failure into what it means and what to do. The messages matched here
+/// are Slingshot's own, from the config, the control helper, and the iroh diagnosis.
+pub fn explain(name: &str, error: &str) -> Problem {
+    let text = error.to_lowercase();
+    let has = |needles: &[&str]| needles.iter().any(|needle| text.contains(needle));
+    let problem = |title: String, detail: String, fix: Option<Fix>| Problem { title, detail, fix };
+    let run = |machine, command: &str| {
+        Some(Fix {
+            machine,
+            command: command.to_string(),
+        })
+    };
+    if has(&["no agent configured"]) {
+        problem(
+            "No box linked yet".to_string(),
+            "Run slingshot start on the box, then link this machine with the code it prints."
+                .to_string(),
+            run(Machine::Client, "slingshot link <code>"),
+        )
+    } else if has(&["no longer accepts"]) {
+        problem(
+            format!("{name} no longer accepts this machine"),
+            format!("Link again from the same network as {name}."),
+            run(Machine::Client, "slingshot link <code>"),
+        )
+    } else if has(&["not running on the agent", "connection refused"]) {
+        problem(
+            format!("Slingshot isn't running on {name}"),
+            format!("{name} is on, but slingshot start has stopped."),
+            run(Machine::Agent, "slingshot start"),
+        )
+    } else if has(&["cannot reach iroh's relays"]) {
+        problem(
+            "This machine is offline".to_string(),
+            "Check the internet connection, then try again.".to_string(),
+            None,
+        )
+    } else if has(&["versions differ", "update slingshot"]) {
+        problem(
+            "Slingshot versions differ".to_string(),
+            format!("Update Slingshot on this machine and on {name}."),
+            None,
+        )
+    } else if has(&[
+        "not reachable",
+        "did not answer",
+        "timed out",
+        "no route to host",
+    ]) {
+        problem(
+            format!("{name} is off or asleep"),
+            "Nothing answered on the local network, tailnet, or iroh. Wake it and check that slingshot start is running.".to_string(),
+            run(Machine::Agent, "slingshot start"),
+        )
+    } else {
+        problem(format!("Can't reach {name}"), error.to_string(), None)
     }
 }
 
@@ -237,6 +322,76 @@ mod tests {
         assert!(status.memory.is_none());
         assert_eq!(status.workspace.unwrap().free_mib, 500_000);
         assert!(status.gpus[0].vram.is_none());
+    }
+
+    #[test]
+    fn failures_are_explained_with_a_fix_on_the_right_machine() {
+        let cases = [
+            (
+                "Could not reach archbox: Slingshot is not running on the Agent. Run slingshot start there: Connection refused (os error 111)",
+                "Slingshot isn't running on archbox",
+                Some((Machine::Agent, "slingshot start")),
+            ),
+            (
+                "archbox is not reachable. It may be off or asleep, or slingshot start is not running there",
+                "archbox is off or asleep",
+                Some((Machine::Agent, "slingshot start")),
+            ),
+            (
+                "archbox did not answer in time",
+                "archbox is off or asleep",
+                Some((Machine::Agent, "slingshot start")),
+            ),
+            (
+                "archbox no longer accepts this machine. Run slingshot link again from the same network as archbox",
+                "archbox no longer accepts this machine",
+                Some((Machine::Client, "slingshot link <code>")),
+            ),
+            (
+                "No Agent configured yet\n\nOn the Agent:   slingshot start",
+                "No box linked yet",
+                Some((Machine::Client, "slingshot link <code>")),
+            ),
+            (
+                "Could not reach archbox, because this machine cannot reach iroh's relays. Check its internet connection",
+                "This machine is offline",
+                None,
+            ),
+            (
+                "Slingshot versions differ between the machines (protocol 4 and 5). Update Slingshot on both machines",
+                "Slingshot versions differ",
+                None,
+            ),
+            ("something new", "Can't reach archbox", None),
+        ];
+        for (error, title, fix) in cases {
+            let problem = explain("archbox", error);
+            assert_eq!(problem.title, title, "{error}");
+            assert_eq!(
+                problem.fix.map(|fix| (fix.machine, fix.command)),
+                fix.map(|(machine, command)| (machine, command.to_string())),
+                "{error}"
+            );
+        }
+        assert_eq!(explain("archbox", "something new").detail, "something new");
+    }
+
+    #[test]
+    fn an_offline_line_carries_the_problem() {
+        let event = Event::Status(Status::offline(
+            "archbox",
+            "archbox did not answer in time".to_string(),
+        ));
+        let line = serde_json::to_value(Line {
+            version: VERSION,
+            event: &event,
+        })
+        .unwrap();
+        assert_eq!(line["online"], false);
+        assert_eq!(line["problem"]["title"], "archbox is off or asleep");
+        assert_eq!(line["problem"]["fix"]["machine"], "agent");
+        assert_eq!(line["problem"]["fix"]["command"], "slingshot start");
+        assert_eq!(line["error"], "archbox did not answer in time");
     }
 
     #[test]
