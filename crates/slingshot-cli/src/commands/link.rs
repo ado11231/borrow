@@ -24,7 +24,7 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
             true => Check::pass(format!("{host} is reachable")),
             false => Check::fail(
                 format!("No response at {host}:{port}"),
-                "Run slingshot serve on the other machine".to_string(),
+                "Run slingshot start on the other machine".to_string(),
             ),
         },
         preflight::tool_check("rsync", Some("copying projects")),

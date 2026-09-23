@@ -1,6 +1,6 @@
-//! Keeps the Agent from sleeping on its own while `slingshot serve` runs, because a sleeping
+//! Keeps the Agent from sleeping on its own while `slingshot start` runs, because a sleeping
 //! box cannot be reached from anywhere. Wraps the system's own tool, and ties its lock to
-//! this process so the lock ends with `serve`, even when `serve` is killed outright.
+//! this process so the lock ends with `start`, even when `start` is killed outright.
 
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::time::Duration;
@@ -39,7 +39,7 @@ fn systemd_inhibit() -> Tool {
     command.args([
         "--what=idle:sleep",
         "--who=Slingshot",
-        "--why=Serving paired Clients",
+        "--why=Reachable by paired Clients",
         "--mode=block",
         "cat",
     ]);

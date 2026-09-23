@@ -99,7 +99,7 @@ impl Diagnosis {
                 "Could not reach {name}, because this machine cannot reach iroh's relays. Check its internet connection"
             )),
             Diagnosis::Offline => Some(format!(
-                "{name} is not reachable. It may be off or asleep, or slingshot serve is not running there"
+                "{name} is not reachable. It may be off or asleep, or slingshot start is not running there"
             )),
             Diagnosis::NotPaired => Some(format!(
                 "{name} no longer accepts this machine. Run slingshot link again from the same network as {name}"

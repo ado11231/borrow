@@ -60,7 +60,7 @@ enum Commands {
     },
 
     #[command(about = "Agent: start the daemon and print a pairing code")]
-    Serve {
+    Start {
         /// The name this box will be known by. Defaults to its hostname.
         #[arg(long)]
         name: Option<String>,
@@ -69,7 +69,7 @@ enum Commands {
         port: u16,
     },
 
-    #[command(about = "Client: pair with a box using the code slingshot serve printed")]
+    #[command(about = "Client: pair with a box using the code slingshot start printed")]
     Link {
         code: String,
 
@@ -211,7 +211,7 @@ async fn main() {
         }
         Commands::InternalRsh { args } => internal_rsh(args),
         Commands::InternalTunnel { key } => tunnel::run(key).await,
-        Commands::Serve { name, port } => slingshot_agent::serve(name, port).await,
+        Commands::Start { name, port } => slingshot_agent::start(name, port).await,
         Commands::Link { code, name } => commands::link::link(code, name).await,
         Commands::Unlink => commands::unlink::unlink(cli.agent).await,
         Commands::Run { cmd } => commands::run::run(cli.agent, cmd).await,

@@ -11,7 +11,7 @@ use std::path::PathBuf;
 /// Shown whenever there is no box to talk to. Names the two commands that fix it,
 /// because a stranger has no config file to look at yet.
 const NO_AGENTS: &str = "No Agent configured yet\n\n\
-                         On the Agent:   slingshot serve\n\
+                         On the Agent:   slingshot start\n\
                          On the Client:  slingshot link <code>";
 
 /// The whole config file. `agents` is a list so it renders as readable `[[agents]]`

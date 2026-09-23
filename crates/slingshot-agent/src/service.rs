@@ -35,7 +35,7 @@ pub fn socket(root: &Path) -> PathBuf {
     root.join("control.sock")
 }
 
-/// Keeps the daemon lock for as long as `slingshot serve` runs.
+/// Keeps the daemon lock for as long as `slingshot start` runs.
 pub struct Service {
     _guard: File,
 }
@@ -44,7 +44,7 @@ pub fn start(name: String) -> anyhow::Result<Service> {
     let root = root()?;
     storage::private_dir(&root)?;
     let guard = storage::try_lock(&root.join("daemon.lock"))?
-        .context("Another slingshot serve is already running for this account")?;
+        .context("Another slingshot start is already running for this account")?;
     let path = socket(&root);
     if path.as_os_str().len() >= 100 {
         bail!(
@@ -249,7 +249,7 @@ pub async fn bridge() -> anyhow::Result<i32> {
     let path = socket(&root()?);
     let stream = UnixStream::connect(&path)
         .await
-        .context("Slingshot is not serving on the Agent. Start slingshot serve there")?;
+        .context("Slingshot is not running on the Agent. Run slingshot start there")?;
     let (mut from_agent, mut to_agent) = stream.into_split();
     let upload = async {
         let mut stdin = tokio::io::stdin();

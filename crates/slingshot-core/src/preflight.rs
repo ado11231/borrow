@@ -129,9 +129,9 @@ pub fn tool_check(program: &str, needed_for: Option<&str>) -> Check {
     }
 }
 
-/// The checks `slingshot serve` runs before it listens. SSH carries all work and control,
+/// The checks `slingshot start` runs before it listens. SSH carries all work and control,
 /// rsync copies project source, and tmux is only needed once someone uses attach.
-pub fn serve_checks() -> Vec<Check> {
+pub fn start_checks() -> Vec<Check> {
     vec![
         ssh_server_check(),
         tool_check("rsync", None),

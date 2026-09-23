@@ -16,7 +16,7 @@ use tracing::{debug, info, warn};
 /// The Agent's own sshd. Slingshot already requires it on the usual port.
 pub const SSHD: SocketAddr = SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST), 22);
 
-/// How long `serve` waits to hear from a relay before saying other networks cannot reach
+/// How long `start` waits to hear from a relay before saying other networks cannot reach
 /// the box yet. The endpoint keeps trying afterwards.
 const ONLINE_WAIT: Duration = Duration::from_secs(15);
 

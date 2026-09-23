@@ -56,13 +56,13 @@ struct Agent {
 }
 
 /// Start the daemon: run the checks, print a pairing code, then listen.
-pub async fn serve(name: Option<String>, port: u16) -> anyhow::Result<i32> {
+pub async fn start(name: Option<String>, port: u16) -> anyhow::Result<i32> {
     let name = name
         .or_else(sysinfo::System::host_name)
         .unwrap_or_else(|| "agent".to_string());
 
-    if preflight::report(&preflight::serve_checks()) {
-        anyhow::bail!("Fix the reported errors, then run slingshot serve again");
+    if preflight::report(&preflight::start_checks()) {
+        anyhow::bail!("Fix the reported errors, then run slingshot start again");
     }
 
     let _service = service::start(name.clone())?;
@@ -94,7 +94,9 @@ pub async fn serve(name: Option<String>, port: u16) -> anyhow::Result<i32> {
 
     let _awake = match awake::hold() {
         Some(awake) => {
-            slingshot_core::presentation::success("Keeping this machine awake while serving");
+            slingshot_core::presentation::success(
+                "Keeping this machine awake while Slingshot runs",
+            );
             Some(awake)
         }
         None => {
@@ -233,7 +235,7 @@ fn pair(agent: &Agent, token: &str, client: &Client) -> Response {
 
     match claimed {
         None => Response::Error {
-            message: "That pairing code has expired or was already used; run slingshot serve again for a fresh one".to_string(),
+            message: "That pairing code has expired or was already used; run slingshot start again for a fresh one".to_string(),
         },
         Some(false) => Response::Error { message: "That pairing code is not right".to_string() },
         Some(true) => match accept(agent, client) {
@@ -339,7 +341,7 @@ fn announce(name: &str, addresses: &[SocketAddr], token: &str) {
     };
 
     eprintln!();
-    slingshot_core::presentation::progress(format!("Slingshot is serving {name}"));
+    slingshot_core::presentation::progress(format!("Slingshot is running on {name}"));
     eprintln!();
 
     if offered.is_empty() {
