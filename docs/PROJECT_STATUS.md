@@ -705,6 +705,8 @@ After archbox was turned on and `slingshot start` run there, the menu bar switch
 
 With `slingshot start` stopped on archbox, the offline screen said Slingshot was not running there and offered `slingshot start`, and it switched back to live numbers by itself once `start` ran again.
 
+Notifications read as plain sentences: a short title such as Finished on archbox, the command as a subtitle, and a body with a spoken duration. Checked live on September 23, 2026 with real runs on archbox: a 12 second run gave Finished, a run exiting 3 after 12 seconds gave Failed, a run whose connection was cut after 10 seconds gave Interrupted, and a quick `echo hi` gave nothing. The offline notice also appeared when `slingshot start` was stopped, before its wording was changed.
+
 Not yet verified: the back notification, resource warnings, and behavior across a log out and log in. On the first install, banners appeared only after notifications were turned on for Slingshot in System Settings. Whether the permission prompt showed is not recorded, so a clear first run prompt still needs checking.
 
 ### Phase 6
@@ -719,7 +721,7 @@ Prepare public releases, installers, packages, diagnostics, licensing, contribut
 
 Verified on September 22, 2026.
 
-The full Rust workspace builds successfully. All 198 automated tests pass, and formatting checks and Clippy pass. The Phase 3 flows were accepted on a real Mac Client and Arch Linux Agent, recorded in section 11. The Phase 4 checks run on those two machines are recorded in section 11c. The full Phase 3 flows have not yet been run again over iroh.
+The full Rust workspace builds successfully. All 200 automated tests pass, and formatting checks and Clippy pass. The Phase 3 flows were accepted on a real Mac Client and Arch Linux Agent, recorded in section 11. The Phase 4 checks run on those two machines are recorded in section 11c. The full Phase 3 flows have not yet been run again over iroh.
 
 The tests cover:
 
