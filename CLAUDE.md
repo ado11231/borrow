@@ -204,7 +204,7 @@ Each phase must leave a working, usable tool. Phase 4 gates publishing, because 
 
 ## Current state
 
-**Phases 1 and 3 are complete. Phase 4 is in progress.** Phase 3 replaced Phase 2's SSHFS execution with filtered
+**Phases 1 and 3 are complete. Phase 4 is in acceptance testing.** Phase 3 replaced Phase 2's SSHFS execution with filtered
 source copies and kept its stack detection and artifact split.
 
 Pairing creates only Client to Agent SSH trust and records the Agent's Borrow path.
@@ -222,14 +222,17 @@ labels and respect terminal detection. Global `--color auto|always|never` contro
 Borrow output. Put Borrow options before `run`; later arguments belong to the remote
 command.
 
-The current suite contains 149 passing tests, and formatting and Clippy pass. The Phase 3
+The current suite contains 179 passing tests, and formatting and Clippy pass. The Phase 3
 flows were accepted on a real Mac Client and Arch Linux Agent, including a network drop
-mid build, a daemon restart, and an Agent reboot.
+mid build, a daemon restart, and an Agent reboot. Phase 4 was checked on the same two
+machines: `run` via the local network, the tailnet, and iroh from a phone hotspot, the
+failure message with `serve` stopped, and the awake lock.
 
 **Not yet true, do not claim otherwise.** File watchers inside sessions, several Clients
 sharing one Agent account, and large Node and Python projects are untested. `borrow.toml`
-split overrides are parsed but never applied; only `sync.exclude` is read. The cleanup
-above has not been re-run on the two real machines.
+split overrides are parsed but never applied; only `sync.exclude` is read. The Phase 3
+flows, meaning sync, attach, a network drop, and a reboot, have not been re-run over iroh.
+Pairing across networks does not exist.
 
 The detailed file reference and completion record live in `docs/PROJECT_STATUS.md`.
 

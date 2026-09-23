@@ -150,6 +150,14 @@ Plans three way syncs, applies staged changes with backups and a recovery journa
 
 Handles shared SSH key work. It learns machine identities, authorizes a Borrow key, labels it clearly, and removes only the key that Borrow owns.
 
+#### `src/network.rs`
+
+Classifies an address as this machine, the local network, a tailnet, or anything else. The Agent uses it to label pairing codes and the Client uses it to decide which address to try first.
+
+#### `src/tunnel.rs`
+
+What both machines share for iroh: the protocol name, the refusal reason, and the persistent iroh identity each machine keeps in its own storage.
+
 #### `src/telemetry.rs`
 
 Collects CPU, memory, disk, workspace disk, operating system, GPU, and installed tool information. It also decides resource warnings.
@@ -177,6 +185,18 @@ This is the Agent side library.
 #### `src/lib.rs`
 
 Runs `borrow serve`. It checks the machine, starts the private control service, creates a short lived pairing code, installs the Client key, and reports the Agent's Borrow program path.
+
+#### `src/tunnel.rs`
+
+Runs the Agent's iroh endpoint. It refuses keys that never paired and joins every stream from a paired Client to the Agent's own sshd on loopback.
+
+#### `src/clients.rs`
+
+Records which Client iroh keys may connect. Pairing adds a key and unlink removes it.
+
+#### `src/awake.rs`
+
+Keeps the Agent from sleeping while `borrow serve` runs, using `systemd-inhibit` on Linux and `caffeinate` on macOS. The lock ends with `serve`, even when `serve` is killed.
 
 #### `src/service.rs`
 
@@ -224,7 +244,15 @@ Creates and loads the dedicated Client SSH key used by Borrow. Where the key liv
 
 #### `src/ssh.rs`
 
-Builds safe SSH commands, runs interactive commands with the terminal attached, and starts SSH for rsync.
+Builds safe SSH commands, runs interactive commands with the terminal attached, and starts SSH for rsync. Over iroh it adds the tunnel as ProxyCommand and shares one connection across a command's calls.
+
+#### `src/route.rs`
+
+Chooses how to reach a box. It probes every saved address at once, takes the most preferred one that answers, and falls back to iroh when none does.
+
+#### `src/tunnel.rs`
+
+The Client end of iroh. It runs as ssh's ProxyCommand, carries ssh's bytes to the Agent, and explains why a box cannot be reached when a connection fails.
 
 #### `src/commands/link.rs`
 
@@ -585,15 +613,57 @@ Done on September 20, 2026, to clear the ground before Phase 4 is built on top o
 
 ### Still to do
 
-Re-pair the two real machines, which the protocol bump now requires, and run the Phase 3 flows again.
+The two real machines were re-paired on September 22, 2026. Running the full Phase 3 flows again is tracked in section 11c.
+
+## 11c. Phase 4: Works From Anywhere
+
+Status: Acceptance testing
+
+Once paired, the Agent is reachable from any network for as long as it is on and `borrow serve` is running. There is no account, no server to host, and no router change. The earlier plan was a Coordinator server we would build and host. It was replaced on September 22, 2026 by wrapping iroh, which provides NAT traversal, relays, and end to end encryption.
+
+### What we accomplished
+
+1. Pairing reports every address the Agent has. The Client probes them all at once and uses the most preferred one that answers: the local network, then anything else, then the tailnet. `run` and `attach` say which path they used.
+
+2. ssh checks host keys under the pairing address, so keys learned at pairing match whichever address or path is used.
+
+3. Each machine keeps a persistent iroh key. Pairing swaps the public halves, and the Agent records which Client keys may connect. `unlink` makes the Agent forget the Client's key. The control protocol is version 5.
+
+4. `borrow serve` runs an iroh endpoint on iroh's public relays and says whether other networks can reach the box. Unpaired keys are refused, and paired Clients reach only the Agent's own sshd.
+
+5. When no saved address answers, ssh reaches the Agent through a hidden `borrow internal-tunnel` ProxyCommand. `run`, `attach`, sync, and control all use it with no other change.
+
+6. Over iroh, ssh's ControlMaster shares one connection across a command's calls and keeps it for 30 seconds.
+
+7. When a connection over iroh fails, the Client names the cause: no internet, a box that is off or asleep or not serving, or a box that no longer accepts this machine.
+
+8. `borrow serve` keeps the Agent from sleeping while it runs.
+
+9. Library logs such as iroh's show only real errors, and a normal iroh disconnect is not reported as a problem.
+
+### Verified on the two real machines
+
+Verified on September 22, 2026 between the Mac Client and archbox, after re-pairing for protocol version 5.
+
+1. `borrow run uname -a` ran via the local network at home, via the tailnet on a phone hotspot, and via iroh on the hotspot with Tailscale off.
+
+2. Over iroh, one ssh call took 1.3 to 1.6 seconds before connection sharing and 0.3 seconds for every later call after it. A first `borrow run` with a small sync took 3.6 seconds and a repeat took 1.5 seconds.
+
+3. With `borrow serve` stopped, `borrow run` on the hotspot failed after about 20 seconds with a message naming the cause.
+
+4. `systemd-inhibit --list` on archbox showed Borrow's lock while serving.
+
+5. A Client key that never paired was refused, and a paired one reached sshd, tested on one machine against iroh's live relays.
+
+### Still to do
+
+Run the Phase 3 flows over iroh: `sync`, `sync --pull`, `attach` with detach and reattach, a network drop mid build, and an Agent reboot. Confirm that the lock disappears when `serve` stops. Pairing across networks and a self hosted relay setting are Phase 6.
 
 ## 12. Later Phases
 
 ### Phase 4
 
-Status: In progress
-
-Once paired, reach the Agent from anywhere for as long as it is on and `borrow serve` is running. The Client tries the local address, then the tailnet address, then iroh, and says which one it used. No account, no server to host, and no router change. Pairing still happens on the same network or tailnet. The step by step plan is in `docs/GUIDE.md`.
+Status: Acceptance testing. See section 11c.
 
 ### Phase 5
 
@@ -609,9 +679,9 @@ Prepare public releases, installers, packages, diagnostics, licensing, contribut
 
 ## 13. Current Verification
 
-Verified on September 20, 2026.
+Verified on September 22, 2026.
 
-The full Rust workspace builds successfully. All 149 automated tests pass, and formatting checks and Clippy pass. The Phase 3 flows were accepted on a real Mac Client and Arch Linux Agent, recorded in section 11, but that was before the cleanup in section 11b. Nothing since then has been run on two machines.
+The full Rust workspace builds successfully. All 179 automated tests pass, and formatting checks and Clippy pass. The Phase 3 flows were accepted on a real Mac Client and Arch Linux Agent, recorded in section 11. The Phase 4 checks run on those two machines are recorded in section 11c. The full Phase 3 flows have not yet been run again over iroh.
 
 The tests cover:
 

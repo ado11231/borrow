@@ -1025,7 +1025,9 @@ At the end of this phase borrow is an impressive, shippable personal tool.
 anywhere" means "go set up a VPN first", which is precisely the friction this project
 exists to remove. **This phase gates publishing.**
 
-**Status: in progress.**
+**Status: acceptance testing.** Steps 1 to 5 are built and were checked on the real
+machines on September 22, 2026. Step 5 also gained connection sharing over iroh and a lock
+that keeps the Agent awake while `serve` runs. See `docs/PROJECT_STATUS.md` section 11c.
 
 The goal in one sentence: once a Client is paired, the Agent is reachable from anywhere for
 as long as it is on and `borrow serve` is running, with no router change and no account.
