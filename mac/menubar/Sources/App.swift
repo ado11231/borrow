@@ -38,31 +38,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// The part that is always visible: a symbol and the two numbers worth a glance.
+/// Only the icon lives in the menu bar. The numbers are one click away, in the panel.
 struct MenuBarLabel: View {
     let watcher: Watcher
 
     var body: some View {
-        if let status = watcher.status, status.online {
-            HStack(spacing: 4) {
-                Image(systemName: "server.rack")
-                Text(summary(status)).monospacedDigit()
-            }
-        } else {
-            HStack(spacing: 4) {
-                Image(systemName: "server.rack")
-                    .opacity(0.5)
-                Text(watcher.status == nil && watcher.problem == nil ? "" : "offline")
-            }
-        }
-    }
-
-    private func summary(_ status: Status) -> String {
-        [
-            status.cpu.map { String(format: "%.0f%%", $0.percent) },
-            status.memory.map(shortCapacity),
-        ]
-        .compactMap { $0 }
-        .joined(separator: " · ")
+        Image(systemName: "server.rack")
+            .opacity(watcher.status?.online == true ? 1 : 0.5)
     }
 }

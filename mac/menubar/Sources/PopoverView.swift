@@ -1,5 +1,41 @@
 import SwiftUI
 
+/// Each resource keeps its own color and icon, so the four sections read apart at a glance.
+enum Metric {
+    case cpu, ram, gpu, workspace
+
+    var label: String {
+        switch self {
+        case .cpu: "CPU"
+        case .ram: "RAM"
+        case .gpu: "GPU"
+        case .workspace: "Workspace"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .cpu: "cpu"
+        case .ram: "memorychip"
+        case .gpu: "square.3.layers.3d"
+        case .workspace: "internaldrive"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .cpu: .blue
+        case .ram: .purple
+        case .gpu: .green
+        case .workspace: .teal
+        }
+    }
+}
+
+/// VRAM sits inside the GPU section but is a different thing from how busy the GPU is, so it
+/// gets its own color.
+let vramColor = Color.pink
+
 /// Healthy values stay plain, as on the command line. Color is for what needs attention.
 func valueColor(_ level: Level?) -> Color {
     switch level {
@@ -9,31 +45,21 @@ func valueColor(_ level: Level?) -> Color {
     }
 }
 
-func graphColor(_ level: Level?) -> Color {
-    switch level {
-    case .warning: .orange
-    case .high: .red
-    default: .accentColor
-    }
-}
-
 struct PopoverView: View {
     let watcher: Watcher
     @State private var startsAtLogin = LoginItem.enabled
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             header
-            Divider()
             if let status = watcher.status, status.online {
                 metrics(status)
             } else {
                 offline
             }
-            Divider()
             footer
         }
-        .padding(14)
+        .padding(16)
         .frame(width: 300)
     }
 
@@ -56,77 +82,70 @@ struct PopoverView: View {
     @ViewBuilder
     private func metrics(_ status: Status) -> some View {
         if let cpu = status.cpu {
-            GraphRow(
-                label: "CPU",
-                value: String(format: "%.0f%%", cpu.percent),
-                level: cpu.level,
-                history: watcher.cpuHistory
-            )
+            MetricSection(metric: .cpu, value: String(format: "%.0f%%", cpu.percent), level: cpu.level) {
+                UsageBar(fraction: cpu.percent / 100, color: Metric.cpu.color)
+            }
         }
         if let memory = status.memory {
-            BarRow(
-                label: "RAM",
+            MetricSection(
+                metric: .ram,
                 value: "\(capacity(memory.usedMib)) / \(capacity(memory.totalMib))",
-                usage: memory
-            )
+                level: memory.level
+            ) {
+                UsageBar(fraction: memory.fraction, color: Metric.ram.color)
+            }
         }
         ForEach(Array(status.gpus.enumerated()), id: \.offset) { index, gpu in
-            gpuRows(gpu, history: index < watcher.gpuHistory.count ? watcher.gpuHistory[index] : [])
+            gpuSection(gpu, title: status.gpus.count > 1 ? "GPU \(index + 1)" : "GPU")
         }
         if let problem = status.gpuProblem {
-            Text(problem)
-                .font(.caption)
-                .foregroundStyle(.orange)
+            MetricSection(metric: .gpu, value: "Unavailable", level: .warning) {
+                Text(problem)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         if let workspace = status.workspace {
-            HStack {
-                Text("Workspace").font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Text("\(capacity(workspace.freeMib)) free")
-                    .font(.system(.callout, design: .rounded).monospacedDigit())
-                    .foregroundStyle(valueColor(workspace.level))
+            MetricSection(
+                metric: .workspace,
+                value: "\(capacity(workspace.freeMib)) free",
+                level: workspace.level
+            ) {
+                EmptyView()
             }
         }
     }
 
-    @ViewBuilder
-    private func gpuRows(_ gpu: Gpu, history: [Double]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            GraphRow(
-                label: "GPU",
-                detail: gpu.name,
-                value: gpuValue(gpu),
-                level: worst(gpu.utilization?.level, gpu.temperatureLevel),
-                history: history
-            )
-            if let vram = gpu.vram {
-                BarRow(
-                    label: "VRAM",
-                    value: "\(capacity(vram.usedMib)) / \(capacity(vram.totalMib))",
-                    usage: vram
+    private func gpuSection(_ gpu: Gpu, title: String) -> some View {
+        MetricSection(
+            metric: .gpu,
+            title: title,
+            detail: gpu.name,
+            value: gpu.temperatureC.map { "\($0)°C" } ?? "",
+            valueIcon: gpu.temperatureC == nil ? nil : "thermometer.medium",
+            level: gpu.temperatureLevel
+        ) {
+            if let usage = gpu.utilization {
+                PartRow(
+                    icon: "gauge.with.dots.needle.33percent",
+                    label: "Usage",
+                    value: String(format: "%.0f%%", usage.percent),
+                    level: usage.level,
+                    fraction: usage.percent / 100,
+                    color: Metric.gpu.color
                 )
             }
-        }
-    }
-
-    private func gpuValue(_ gpu: Gpu) -> String {
-        [
-            gpu.utilization.map { String(format: "%.0f%%", $0.percent) },
-            gpu.temperatureC.map { "\($0)°C" },
-        ]
-        .compactMap { $0 }
-        .joined(separator: " · ")
-    }
-
-    private func worst(_ a: Level?, _ b: Level?) -> Level? {
-        [a, b].compactMap { $0 }.max { rank($0) < rank($1) }
-    }
-
-    private func rank(_ level: Level) -> Int {
-        switch level {
-        case .good: 0
-        case .warning: 1
-        case .high: 2
+            if let vram = gpu.vram {
+                PartRow(
+                    icon: "square.stack.3d.down.right",
+                    label: "VRAM",
+                    value: "\(capacity(vram.usedMib)) / \(capacity(vram.totalMib))",
+                    level: vram.level,
+                    fraction: vram.fraction,
+                    color: vramColor
+                )
+            }
         }
     }
 
@@ -145,70 +164,137 @@ struct PopoverView: View {
     }
 
     private var footer: some View {
-        HStack {
-            Toggle("Open at login", isOn: $startsAtLogin)
-                .toggleStyle(.checkbox)
-                .font(.caption)
-                .onAppear { startsAtLogin = LoginItem.enabled }
-                .onChange(of: startsAtLogin) { _, on in
-                    if on != LoginItem.enabled { LoginItem.set(on) }
-                }
-            Spacer()
-            Button("Quit") { NSApplication.shared.terminate(nil) }
-                .buttonStyle(.borderless)
-                .font(.caption)
-                .keyboardShortcut("q")
+        VStack(spacing: 2) {
+            MenuRow(icon: "arrow.clockwise.circle", title: "Open at login") {
+                startsAtLogin.toggle()
+            } trailing: {
+                Toggle("", isOn: $startsAtLogin)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .labelsHidden()
+            }
+            MenuRow(icon: "power", title: "Quit Slingshot") {
+                NSApplication.shared.terminate(nil)
+            } trailing: {
+                Text("⌘Q")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .keyboardShortcut("q")
+        }
+        .padding(.horizontal, -8)
+        .onAppear { startsAtLogin = LoginItem.enabled }
+        .onChange(of: startsAtLogin) { _, on in
+            if on != LoginItem.enabled { LoginItem.set(on) }
         }
     }
 }
 
-struct GraphRow: View {
-    let label: String
-    var detail: String? = nil
-    let value: String
-    let level: Level?
-    let history: [Double]
+/// A full width row that highlights under the pointer, like a native menu item.
+struct MenuRow<Trailing: View>: View {
+    let icon: String
+    let title: String
+    let action: () -> Void
+    @ViewBuilder let trailing: Trailing
+    @State private var hovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(label).font(.caption).foregroundStyle(.secondary)
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+                Text(title)
+                    .font(.callout)
+                Spacer()
+                trailing
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(hovering ? Color.primary.opacity(0.1) : .clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+}
+
+/// One resource: its icon and name, the current value, and whatever graph belongs under it.
+struct MetricSection<Content: View>: View {
+    let metric: Metric
+    var title: String? = nil
+    var detail: String? = nil
+    let value: String
+    var valueIcon: String? = nil
+    let level: Level?
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: metric.icon)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(metric.color)
+                    .frame(width: 16)
+                Text(title ?? metric.label)
+                    .font(.caption.weight(.semibold))
                 if let detail {
                     Text(detail)
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-                Spacer()
-                Text(value)
-                    .font(.system(.callout, design: .rounded).monospacedDigit())
-                    .foregroundStyle(valueColor(level))
+                Spacer(minLength: 8)
+                HStack(spacing: 3) {
+                    if let valueIcon {
+                        Image(systemName: valueIcon)
+                            .font(.caption)
+                    }
+                    Text(value)
+                        .font(.system(.callout, design: .rounded).monospacedDigit())
+                }
+                .foregroundStyle(valueColor(level))
+                .layoutPriority(1)
             }
-            Sparkline(values: history, color: graphColor(level))
-                .frame(height: 28)
-        }
-    }
-}
-
-struct BarRow: View {
-    let label: String
-    let value: String
-    let usage: Usage
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(label).font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Text(value)
-                    .font(.system(.callout, design: .rounded).monospacedDigit())
-                    .foregroundStyle(valueColor(usage.level))
-            }
-            UsageBar(fraction: usage.fraction, color: graphColor(usage.level))
+            content
         }
     }
 }
 
 extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
+}
+
+/// One measured part of a section, such as GPU usage or VRAM, with its own icon and bar.
+struct PartRow: View {
+    let icon: String
+    let label: String
+    let value: String
+    let level: Level?
+    let fraction: Double
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.caption2)
+                    .foregroundStyle(color)
+                    .frame(width: 16)
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(value)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(valueColor(level))
+            }
+            UsageBar(fraction: fraction, color: color)
+        }
+    }
 }

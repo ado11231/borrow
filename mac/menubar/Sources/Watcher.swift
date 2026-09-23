@@ -1,19 +1,13 @@
 import Foundation
 import Observation
 
-/// Runs `slingshot internal-watch` and keeps what it reports, plus a short history for the
-/// graphs. Closing the helper's input is what stops it, so it never outlives the app.
+/// Runs `slingshot internal-watch` and keeps what it reports. Closing the helper's input is what stops it, so it never outlives the app.
 @MainActor
 @Observable
 final class Watcher {
-    /// About two minutes at one sample every two seconds.
-    static let historyLength = 60
-
     private(set) var status: Status?
     /// Why there is nothing to show, such as a missing program or a helper that keeps failing.
     private(set) var problem: String?
-    private(set) var cpuHistory: [Double] = []
-    private(set) var gpuHistory: [[Double]] = []
 
     var onNotice: ((Notice) -> Void)?
 
@@ -110,18 +104,6 @@ final class Watcher {
         self.status = status
         problem = nil
         restarts = 0
-        guard status.online else { return }
-        cpuHistory = appended(cpuHistory, status.cpu?.percent ?? 0)
-        if gpuHistory.count != status.gpus.count {
-            gpuHistory = Array(repeating: [], count: status.gpus.count)
-        }
-        for (index, gpu) in status.gpus.enumerated() {
-            gpuHistory[index] = appended(gpuHistory[index], gpu.utilization?.percent ?? 0)
-        }
-    }
-
-    private func appended(_ history: [Double], _ value: Double) -> [Double] {
-        Array((history + [value]).suffix(Self.historyLength))
     }
 
     /// The helper only exits on its own when something is wrong, so show why and try again.

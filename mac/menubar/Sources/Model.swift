@@ -83,10 +83,3 @@ func decodeEvent(_ line: Data) -> Event? {
 func capacity(_ mib: UInt64) -> String {
     mib >= 1024 ? String(format: "%.1f GiB", Double(mib) / 1024) : "\(mib) MiB"
 }
-
-/// `12/32G`, short enough for the menu bar.
-func shortCapacity(_ usage: Usage) -> String {
-    let used = Double(usage.usedMib) / 1024
-    let total = Double(usage.totalMib) / 1024
-    return String(format: "%.0f/%.0fG", used, total)
-}
