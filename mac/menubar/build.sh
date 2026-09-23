@@ -22,6 +22,10 @@ codesign --force --sign - "$app"
 echo "✓ Built $app"
 
 osascript -e 'quit app id "dev.slingshot.menubar"' >/dev/null 2>&1 || true
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    pgrep -f "$destination/Slingshot.app/Contents/MacOS/Slingshot" >/dev/null || break
+    sleep 0.5
+done
 mkdir -p "$destination"
 rm -rf "$destination/Slingshot.app"
 cp -R "$app" "$destination/"
