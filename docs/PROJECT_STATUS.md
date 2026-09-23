@@ -659,7 +659,7 @@ Verified on September 22, 2026 between the Mac Client and archbox, after re-pair
 
 ### Follow ups found during acceptance
 
-1. `borrow attach` works but feels unclear, messy, and not responsive. The user asked for this to be reworked later rather than now. Whether the lag comes from iroh or from the session itself is not yet measured.
+1. `borrow attach` works but feels unclear, messy, and not responsive. The user asked for this to be reworked later rather than now. Whether the lag comes from iroh or from the session itself is not yet measured. Inside a session, Claude Code ran but looked broken, and Codex did not run at all. Likely causes to check first: the session shell not activating mise, which is where Codex's Node lives on archbox, and the terminal type, colors, or UTF-8 settings inside the Borrow tmux server.
 
 2. `borrow serve` does not start by itself after the Agent reboots, so the Agent is unreachable until someone logs in and runs it. Installing it as a service that starts at boot is planned, currently listed under Phase 7.
 
