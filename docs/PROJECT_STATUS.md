@@ -675,7 +675,7 @@ On September 22, 2026 the project was renamed from borrow to Slingshot, and `ser
 
 ### Output redesign
 
-Also on September 22, 2026, output moved to one style. Connecting, syncing, pairing, and stopping are steps: a spinner while they run, then a checked line with the time taken. `run` ends with its total time and exit code. Color marks only symbols, the box and path, and values that need attention, so a warning stands out. Checked on the real Mac and archbox with `run`, `ps`, `info`, `health`, and `env list`. The spinners themselves were only seen in an interactive terminal by hand.
+Also on September 22, 2026, output moved to one style. Connecting, syncing, pairing, and stopping are steps: a spinner while they run, then a checked line with the time taken. `run` ends with its total time and exit code. Color marks only symbols, the box and path, and values that need attention, so a warning stands out. Checked on the real Mac and archbox with `run`, `ps`, `info`, `health`, and `env list`. The spinners themselves still need checking by eye in an interactive terminal.
 
 ## 12. Later Phases
 
