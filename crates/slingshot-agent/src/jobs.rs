@@ -226,7 +226,7 @@ fn tmux_config(shell: &str, terminal: &str) -> String {
 
 /// The account's login shell from the user database, so a session loads the same startup
 /// files as a normal login even when `slingshot start` ran without `SHELL` set.
-fn login_shell(root: &Path) -> String {
+pub fn login_shell(root: &Path) -> String {
     let from_database = fs::metadata(root).ok().and_then(|meta| {
         let out = Command::new("getent")
             .args(["passwd", &meta.uid().to_string()])

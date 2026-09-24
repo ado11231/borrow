@@ -7,13 +7,14 @@
 
 use crate::protocol::{Health, Specs};
 use crate::source::Manifest;
+use crate::tools::Tool;
 use anyhow::{Context, bail, ensure};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Wire version of this control protocol. Both machines must agree on it, so any change
 /// to a request or response shape has to raise it.
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 
 /// Largest frame in either direction. Manifests for very large projects are the limit.
 pub const MAX_FRAME: u32 = 16 * 1024 * 1024;
@@ -86,6 +87,8 @@ pub enum Request {
         client: String,
         projects: Vec<String>,
     },
+    /// Which developer tools a session on the Agent would find.
+    Tools,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +108,17 @@ pub enum Response {
     Job(Job),
     EnvironmentFiles(Vec<String>),
     Unlinked { environment_files: usize },
+    Tools(AgentTools),
+}
+
+/// The developer tools on the Agent, and what installing more of them needs there.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentTools {
+    pub installed: Vec<Tool>,
+    /// The package manager found on the Agent, such as `pacman`.
+    pub manager: Option<String>,
+    /// The account's login shell, which runs install commands so they see a session's PATH.
+    pub shell: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -283,5 +297,23 @@ mod tests {
         let (mut c, d) = tokio::io::duplex(64);
         drop(d);
         assert!(read_frame::<_, Request>(&mut c).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn the_tools_reply_round_trips() {
+        let (mut a, mut b) = tokio::io::duplex(1024);
+        let reply = Response::Tools(AgentTools {
+            installed: vec![Tool::Git, Tool::ClaudeCode],
+            manager: Some("pacman".into()),
+            shell: "/usr/bin/bash".into(),
+        });
+        write_frame(&mut a, &reply).await.unwrap();
+
+        let Some(Response::Tools(back)) = read_frame(&mut b).await.unwrap() else {
+            panic!("expected a tools reply");
+        };
+        assert_eq!(back.installed, vec![Tool::Git, Tool::ClaudeCode]);
+        assert_eq!(back.manager.as_deref(), Some("pacman"));
+        assert_eq!(back.shell, "/usr/bin/bash");
     }
 }

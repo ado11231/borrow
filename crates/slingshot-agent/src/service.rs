@@ -6,8 +6,8 @@
 
 use crate::{jobs, projects};
 use anyhow::{Context, bail};
-use slingshot_core::control::{self, Request, Response};
-use slingshot_core::{storage, telemetry};
+use slingshot_core::control::{self, AgentTools, Request, Response};
+use slingshot_core::{preflight, storage, telemetry, tools};
 use std::fs::File;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -236,12 +236,31 @@ fn respond(root: &Path, name: &str, request: Request) -> anyhow::Result<Response
             crate::clients::forget(root, &client)?;
             Response::Unlinked { environment_files }
         }
+        Request::Tools => Response::Tools(agent_tools(root)?),
         Request::Ping
         | Request::Begin { .. }
         | Request::Finish { .. }
         | Request::Release { .. } => {
             bail!("Unexpected control request")
         }
+    })
+}
+
+/// The tools a session on this account would find. The probe runs in the login shell,
+/// because tools such as rustup and Claude Code add themselves to PATH in startup files
+/// that `slingshot start` may never have read.
+fn agent_tools(root: &Path) -> anyhow::Result<AgentTools> {
+    let shell = jobs::login_shell(root);
+    let output = std::process::Command::new(&shell)
+        .args(["-l", "-c", &tools::probe_script()])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .with_context(|| format!("Could not start the login shell {shell} on the Agent"))?;
+    Ok(AgentTools {
+        installed: tools::found(&String::from_utf8_lossy(&output.stdout)),
+        manager: preflight::package_manager().map(str::to_string),
+        shell,
     })
 }
 
