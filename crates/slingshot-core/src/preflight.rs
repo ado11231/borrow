@@ -68,22 +68,36 @@ pub fn report(checks: &[Check]) -> bool {
     checks.iter().any(|c| c.state == State::Fail)
 }
 
+/// Package managers Slingshot knows how to name in a fix, in the order they are looked for.
+const PACKAGE_MANAGERS: &[&str] = &["pacman", "apt", "dnf", "zypper", "apk", "brew"];
+
+/// The first known package manager on this machine.
+pub fn package_manager() -> Option<&'static str> {
+    PACKAGE_MANAGERS
+        .iter()
+        .copied()
+        .find(|manager| is_installed(manager))
+}
+
+/// The command that installs `packages` with `manager`, or `None` for a manager Slingshot
+/// does not know.
+pub fn install_command(manager: &str, packages: &str) -> Option<String> {
+    Some(match manager {
+        "pacman" => format!("sudo pacman -S {packages}"),
+        "apt" => format!("sudo apt install {packages}"),
+        "dnf" => format!("sudo dnf install {packages}"),
+        "zypper" => format!("sudo zypper install {packages}"),
+        "apk" => format!("sudo apk add {packages}"),
+        "brew" => format!("brew install {packages}"),
+        _ => return None,
+    })
+}
+
 /// The install command for this machine, so the fix line names a package manager
 /// that actually exists here. Falls back to naming the package on its own.
 pub fn install_hint(package: &str) -> String {
-    let managers = [
-        ("pacman", format!("sudo pacman -S {package}")),
-        ("apt", format!("sudo apt install {package}")),
-        ("dnf", format!("sudo dnf install {package}")),
-        ("zypper", format!("sudo zypper install {package}")),
-        ("apk", format!("sudo apk add {package}")),
-        ("brew", format!("brew install {package}")),
-    ];
-
-    managers
-        .into_iter()
-        .find(|(manager, _)| is_installed(manager))
-        .map(|(_, command)| command)
+    package_manager()
+        .and_then(|manager| install_command(manager, package))
         .unwrap_or_else(|| format!("install {package} with your package manager"))
 }
 
@@ -145,4 +159,29 @@ pub fn start_checks() -> Vec<Check> {
             ),
         },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_known_manager_has_its_own_install_command() {
+        assert_eq!(
+            install_command("pacman", "tmux").as_deref(),
+            Some("sudo pacman -S tmux")
+        );
+        assert_eq!(
+            install_command("brew", "tmux").as_deref(),
+            Some("brew install tmux")
+        );
+        for manager in PACKAGE_MANAGERS {
+            assert!(install_command(manager, "tmux").is_some(), "{manager}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_manager_has_no_install_command() {
+        assert_eq!(install_command("emerge", "tmux"), None);
+    }
 }
