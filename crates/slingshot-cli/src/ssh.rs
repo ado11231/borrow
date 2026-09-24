@@ -46,6 +46,8 @@ pub struct RemoteCommand {
     pub shared: Option<PathBuf>,
     /// Whether to ask for a terminal on the box. See `wants_terminal`.
     pub tty: bool,
+    /// A port on the Agent to reach at the same port on this machine while the command runs.
+    pub forward: Option<u16>,
     pub program: String,
     pub args: Vec<String>,
 }
@@ -73,6 +75,7 @@ impl RemoteCommand {
             known_hosts: agent.known_hosts.clone(),
             host_key_alias: Some(agent.host.clone()),
             tty: wants_terminal(),
+            forward: None,
             program,
             args,
         }
@@ -139,6 +142,13 @@ impl RemoteCommand {
 
         if self.tty {
             argv.push("-t".to_string());
+        }
+
+        if let Some(port) = self.forward {
+            argv.push("-o".to_string());
+            argv.push("ExitOnForwardFailure=yes".to_string());
+            argv.push("-L".to_string());
+            argv.push(format!("{port}:localhost:{port}"));
         }
 
         argv.push(self.destination());
@@ -331,6 +341,7 @@ mod tests {
             proxy: None,
             shared: None,
             tty: false,
+            forward: None,
             program: "echo".to_string(),
             args: args.iter().map(|s| s.to_string()).collect(),
         }
@@ -431,6 +442,21 @@ mod tests {
         let argv = interactive.to_ssh_args();
 
         assert!(argv.contains(&"-t".to_string()), "argv was: {argv:?}");
+        assert_eq!(argv.last().unwrap(), "echo hi");
+    }
+
+    #[test]
+    fn a_forwarded_port_fails_loudly_when_it_is_taken() {
+        assert!(!remote(&["hi"]).to_ssh_args().contains(&"-L".to_string()));
+
+        let mut command = remote(&["hi"]);
+        command.forward = Some(1455);
+
+        let argv = command.to_ssh_args();
+        let at = argv.iter().position(|arg| arg == "-L").unwrap();
+
+        assert_eq!(argv[at + 1], "1455:localhost:1455");
+        assert!(argv.contains(&"ExitOnForwardFailure=yes".to_string()));
         assert_eq!(argv.last().unwrap(), "echo hi");
     }
 
