@@ -213,6 +213,12 @@ fn tmux_config(shell: &str, terminal: &str) -> String {
         "set -s set-clipboard on".to_string(),
         "set -g mouse on".to_string(),
         "set -g history-limit 50000".to_string(),
+        "set -g status-style \"bg=default,fg=colour245\"".to_string(),
+        "set -g status-left-length 80".to_string(),
+        "set -g status-left \"#{@slingshot} \"".to_string(),
+        "set -g status-right \"Ctrl B, D to detach \"".to_string(),
+        "set -g window-status-format \"\"".to_string(),
+        "set -g window-status-current-format \"\"".to_string(),
     ]
     .join("\n")
         + "\n"
@@ -290,6 +296,44 @@ fn prepare_server(root: &Path) -> anyhow::Result<PathBuf> {
     Ok(config)
 }
 
+/// Where a session starts: `~/Slingshot/<project>`, a link to the project copy, so the
+/// prompt inside shows the project rather than Slingshot's storage path. An existing file,
+/// or a link to another copy, is never replaced; the short ID is added instead.
+fn project_link(home: &Path, name: &str, id: &str, target: &Path) -> anyhow::Result<PathBuf> {
+    let folder = home.join("Slingshot");
+    fs::create_dir_all(&folder)?;
+    let clean: String = name
+        .chars()
+        .map(|c| match c.is_ascii_alphanumeric() || "._-".contains(c) {
+            true => c,
+            false => '_',
+        })
+        .collect();
+    let clean = match clean.trim_start_matches('.') {
+        "" => "project".to_string(),
+        rest => rest.to_string(),
+    };
+    for candidate in [clean.clone(), format!("{clean}-{}", storage::short_id(id))] {
+        let link = folder.join(candidate);
+        match fs::symlink_metadata(&link) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                std::os::unix::fs::symlink(target, &link)?;
+                return Ok(link);
+            }
+            Ok(meta) if meta.file_type().is_symlink() && fs::read_link(&link)? == target => {
+                return Ok(link);
+            }
+            _ => continue,
+        }
+    }
+    bail!("Could not make a link to {name} in {}", folder.display())
+}
+
+/// What the bar at the bottom of a session shows: where the work runs.
+fn session_label(agent: &str, place: &str) -> String {
+    format!("▶ {agent} · {place}").replace('#', "")
+}
+
 fn active_session(root: &Path, project: Option<&str>) -> anyhow::Result<Option<Job>> {
     Ok(list(root, false)?
         .into_iter()
@@ -300,7 +344,7 @@ fn active_session(root: &Path, project: Option<&str>) -> anyhow::Result<Option<J
 /// `None`, creating it when there is none. A project session works in the source copy
 /// with build output redirected. The home session works in the account's home folder
 /// and copies nothing.
-pub fn session(root: &Path, project: Option<&str>) -> anyhow::Result<SessionInfo> {
+pub fn session(root: &Path, agent: &str, project: Option<&str>) -> anyhow::Result<SessionInfo> {
     let socket = tmux_socket(root)
         .to_str()
         .context("Agent storage path is not UTF 8")?
@@ -321,6 +365,9 @@ pub fn session(root: &Path, project: Option<&str>) -> anyhow::Result<SessionInfo
         return Ok(reuse(job));
     }
 
+    let home = directories::BaseDirs::new()
+        .map(|dirs| dirs.home_dir().to_path_buf())
+        .context("Could not find the Agent account's home folder")?;
     let (directory, mut env, owner, _lock) = match project {
         Some(id) => {
             let (paths, metadata) = projects::load(root, id)?;
@@ -333,7 +380,9 @@ pub fn session(root: &Path, project: Option<&str>) -> anyhow::Result<SessionInfo
             };
             projects::ensure_ready(&paths, &metadata)?;
             let env = projects::prepare_artifacts(&paths)?;
-            (paths.source, env, Some((metadata.id, metadata.name)), lock)
+            let directory = project_link(&home, &metadata.name, &metadata.id, &paths.source)
+                .unwrap_or(paths.source);
+            (directory, env, Some((metadata.id, metadata.name)), lock)
         }
         None => {
             storage::private_dir(&root.join("tmux"))?;
@@ -341,13 +390,11 @@ pub fn session(root: &Path, project: Option<&str>) -> anyhow::Result<SessionInfo
             if let Some(job) = active_session(root, None)? {
                 return Ok(reuse(job));
             }
-            let home = directories::BaseDirs::new()
-                .map(|dirs| dirs.home_dir().to_path_buf())
-                .context("Could not find the Agent account's home folder")?;
-            (home, Vec::new(), None, lock)
+            (home.clone(), Vec::new(), None, lock)
         }
     };
     env.extend(session_environment());
+    env.push(("PWD".to_string(), directory.display().to_string()));
     let config = prepare_server(root)?;
 
     let (label, owner) = match &owner {
@@ -366,6 +413,11 @@ pub fn session(root: &Path, project: Option<&str>) -> anyhow::Result<SessionInfo
         command.arg("-e").arg(format!("{key}={value}"));
     }
     let created = command.output();
+    let place = owner.map(|(_, name)| name).unwrap_or("home");
+    let _ = tmux(root)
+        .args(["set-option", "-t", &format!("={}", job.id), "@slingshot"])
+        .arg(session_label(agent, place))
+        .output();
     let failure = match &created {
         Ok(out) if out.status.success() => None,
         Ok(out) => Some(String::from_utf8_lossy(&out.stderr).trim().to_string()),
@@ -552,6 +604,45 @@ mod tests {
         assert!(!usable_shell("/bin/sh\" ; evil"));
         assert!(!usable_shell("/bin/$SHELL"));
         assert!(!usable_shell("/no/such/shell"));
+    }
+
+    #[test]
+    fn a_project_link_is_readable_and_never_replaces_other_files() {
+        let home = crate::testing::Root::new();
+        let copy = home.0.join("copy");
+        fs::create_dir(&copy).unwrap();
+        let link = project_link(&home.0, "my app", "abcdef0123456789", &copy).unwrap();
+        assert_eq!(link, home.0.join("Slingshot").join("my_app"));
+        assert_eq!(fs::read_link(&link).unwrap(), copy);
+        assert_eq!(
+            project_link(&home.0, "my app", "abcdef0123456789", &copy).unwrap(),
+            link
+        );
+
+        let other = home.0.join("other");
+        fs::create_dir(&other).unwrap();
+        let second = project_link(&home.0, "my app", "1234567890abcdef", &other).unwrap();
+        assert_ne!(second, link);
+        assert_eq!(fs::read_link(&second).unwrap(), other);
+
+        fs::write(home.0.join("Slingshot").join("notes"), "mine").unwrap();
+        let beside = project_link(&home.0, "notes", "fedcba9876543210", &copy).unwrap();
+        assert_ne!(beside, home.0.join("Slingshot").join("notes"));
+        assert_eq!(
+            fs::read_to_string(home.0.join("Slingshot").join("notes")).unwrap(),
+            "mine"
+        );
+        assert!(
+            project_link(&home.0, "../..", "0011223344556677", &copy)
+                .unwrap()
+                .starts_with(home.0.join("Slingshot"))
+        );
+    }
+
+    #[test]
+    fn the_bar_says_where_the_session_runs() {
+        assert_eq!(session_label("archbox", "home"), "▶ archbox · home");
+        assert_eq!(session_label("archbox", "app#1"), "▶ archbox · app1");
     }
 
     #[test]
