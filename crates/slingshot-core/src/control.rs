@@ -13,7 +13,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Wire version of this control protocol. Both machines must agree on it, so any change
 /// to a request or response shape has to raise it.
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 6;
 
 /// Largest frame in either direction. Manifests for very large projects are the limit.
 pub const MAX_FRAME: u32 = 16 * 1024 * 1024;
@@ -56,8 +56,10 @@ pub enum Request {
     Release {
         token: String,
     },
+    /// Open or return to a session: in a project's copy, or in the Agent account's home
+    /// folder when `project` is `None`.
     Session {
-        project: String,
+        project: Option<String>,
     },
     Jobs {
         all: bool,

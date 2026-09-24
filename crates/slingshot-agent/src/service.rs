@@ -207,7 +207,7 @@ fn respond(root: &Path, name: &str, request: Request) -> anyhow::Result<Response
         Request::Inspect { project, excludes } => {
             Response::Snapshot(projects::inspect(root, &project, &excludes)?)
         }
-        Request::Session { project } => Response::Session(jobs::session(root, &project)?),
+        Request::Session { project } => Response::Session(jobs::session(root, project.as_deref())?),
         Request::Jobs { all } => Response::Jobs(jobs::list(root, all)?),
         Request::Stop { job } => Response::Job(jobs::stop(root, &job)?),
         Request::EnvAdd {

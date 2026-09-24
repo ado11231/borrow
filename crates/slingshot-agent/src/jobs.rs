@@ -8,6 +8,7 @@ use slingshot_core::preflight;
 use slingshot_core::storage;
 use std::collections::HashMap;
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -200,9 +201,106 @@ fn session_exists(root: &Path, id: &str) -> bool {
         .is_ok_and(|out| out.status.success())
 }
 
-/// Return the project's live session, or create one in the source copy.
-pub fn session(root: &Path, project: &str) -> anyhow::Result<SessionInfo> {
-    let (paths, metadata) = projects::load(root, project)?;
+/// The shell, terminal, and input settings every Slingshot session gets. Sessions start
+/// from the daemon, so nothing here may depend on the daemon's own environment.
+fn tmux_config(shell: &str, terminal: &str) -> String {
+    [
+        format!("set -g default-shell \"{shell}\""),
+        format!("set -g default-terminal \"{terminal}\""),
+        "set -as terminal-features \",*:RGB\"".to_string(),
+        "set -s escape-time 10".to_string(),
+        "set -s focus-events on".to_string(),
+        "set -s set-clipboard on".to_string(),
+        "set -g mouse on".to_string(),
+        "set -g history-limit 50000".to_string(),
+    ]
+    .join("\n")
+        + "\n"
+}
+
+/// The account's login shell from the user database, so a session loads the same startup
+/// files as a normal login even when `slingshot start` ran without `SHELL` set.
+fn login_shell(root: &Path) -> String {
+    let from_database = fs::metadata(root).ok().and_then(|meta| {
+        let out = Command::new("getent")
+            .args(["passwd", &meta.uid().to_string()])
+            .output()
+            .ok()?;
+        let line = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        (out.status.success()).then(|| line.rsplit(':').next().unwrap_or_default().to_string())
+    });
+    [from_database, std::env::var("SHELL").ok()]
+        .into_iter()
+        .flatten()
+        .find(|shell| usable_shell(shell))
+        .unwrap_or_else(|| "/bin/sh".to_string())
+}
+
+/// A shell path is written into the tmux config, so it must be absolute, present, and
+/// free of anything that could break out of its quotes.
+fn usable_shell(shell: &str) -> bool {
+    shell.starts_with('/') && !shell.contains(['"', '\\', '\n', '$']) && Path::new(shell).is_file()
+}
+
+/// The richest terminal type this machine can describe, for full color in sessions.
+fn session_terminal() -> &'static str {
+    let described = Command::new("infocmp")
+        .arg("tmux-256color")
+        .output()
+        .is_ok_and(|out| out.status.success());
+    match described {
+        true => "tmux-256color",
+        false => "screen-256color",
+    }
+}
+
+/// Variables every new session gets. Programs inside draw box and emoji characters only
+/// with a UTF-8 locale, and use full color only when told the terminal supports it.
+fn session_environment() -> Vec<(String, String)> {
+    let mut variables = vec![("COLORTERM".to_string(), "truecolor".to_string())];
+    let locale = ["LC_ALL", "LC_CTYPE", "LANG"]
+        .iter()
+        .find_map(|key| std::env::var(key).ok().filter(|value| !value.is_empty()));
+    if !is_utf8(locale.as_deref()) {
+        variables.push(("LANG".to_string(), "C.UTF-8".to_string()));
+    }
+    variables
+}
+
+fn is_utf8(locale: Option<&str>) -> bool {
+    locale.is_some_and(|value| value.to_ascii_lowercase().replace('-', "").contains("utf8"))
+}
+
+/// Write the session config and apply it to a server that is already running, so the
+/// settings hold before any new shell starts. A new server reads it through `-f`.
+fn prepare_server(root: &Path) -> anyhow::Result<PathBuf> {
+    storage::private_dir(&root.join("tmux"))?;
+    let config = root.join("tmux").join("tmux.conf");
+    storage::write_bytes(
+        &config,
+        tmux_config(&login_shell(root), session_terminal()).as_bytes(),
+    )?;
+    let running = tmux(root)
+        .arg("list-sessions")
+        .output()
+        .is_ok_and(|out| out.status.success());
+    if running {
+        let _ = tmux(root).arg("source-file").arg(&config).output();
+    }
+    Ok(config)
+}
+
+fn active_session(root: &Path, project: Option<&str>) -> anyhow::Result<Option<Job>> {
+    Ok(list(root, false)?
+        .into_iter()
+        .find(|job| job.kind == JobKind::Session && job.project.as_deref() == project))
+}
+
+/// Return the live session for a project, or for the home folder when `project` is
+/// `None`, creating it when there is none. A project session works in the source copy
+/// with build output redirected. The home session works in the account's home folder
+/// and copies nothing.
+pub fn session(root: &Path, project: Option<&str>) -> anyhow::Result<SessionInfo> {
     let socket = tmux_socket(root)
         .to_str()
         .context("Agent storage path is not UTF 8")?
@@ -213,47 +311,57 @@ pub fn session(root: &Path, project: &str) -> anyhow::Result<SessionInfo> {
             preflight::install_hint("tmux")
         )
     })?;
-    let existing = |root: &Path| -> anyhow::Result<Option<Job>> {
-        Ok(active_for(root, project)?
-            .into_iter()
-            .find(|job| job.kind == JobKind::Session))
+    let reuse = |job: Job| SessionInfo {
+        job,
+        socket: socket.clone(),
+        tmux: program.clone(),
+        created: false,
     };
-    if let Some(job) = existing(root)? {
-        return Ok(SessionInfo {
-            job,
-            socket,
-            tmux: program.clone(),
-            created: false,
-        });
+    if let Some(job) = active_session(root, project)? {
+        return Ok(reuse(job));
     }
-    let _lock = match projects::acquire(root, &paths, &metadata, projects::Blocking::Runs) {
-        Ok(lock) => lock,
-        Err(error) => match existing(root)? {
-            Some(job) => {
-                return Ok(SessionInfo {
-                    job,
-                    socket,
-                    tmux: program.clone(),
-                    created: false,
-                });
-            }
-            None => return Err(error),
-        },
-    };
-    projects::ensure_ready(&paths, &metadata)?;
-    let env = projects::prepare_artifacts(&paths)?;
-    storage::private_dir(&root.join("tmux"))?;
 
-    let job = new_job(
-        JobKind::Session,
-        Some((&metadata.id, &metadata.name)),
-        "Shell session".to_string(),
-    );
+    let (directory, mut env, owner, _lock) = match project {
+        Some(id) => {
+            let (paths, metadata) = projects::load(root, id)?;
+            let lock = match projects::acquire(root, &paths, &metadata, projects::Blocking::Runs) {
+                Ok(lock) => lock,
+                Err(error) => match active_session(root, project)? {
+                    Some(job) => return Ok(reuse(job)),
+                    None => return Err(error),
+                },
+            };
+            projects::ensure_ready(&paths, &metadata)?;
+            let env = projects::prepare_artifacts(&paths)?;
+            (paths.source, env, Some((metadata.id, metadata.name)), lock)
+        }
+        None => {
+            storage::private_dir(&root.join("tmux"))?;
+            let lock = storage::lock(&root.join("tmux").join("home.lock"))?;
+            if let Some(job) = active_session(root, None)? {
+                return Ok(reuse(job));
+            }
+            let home = directories::BaseDirs::new()
+                .map(|dirs| dirs.home_dir().to_path_buf())
+                .context("Could not find the Agent account's home folder")?;
+            (home, Vec::new(), None, lock)
+        }
+    };
+    env.extend(session_environment());
+    let config = prepare_server(root)?;
+
+    let (label, owner) = match &owner {
+        Some((id, name)) => ("Shell session", Some((id.as_str(), name.as_str()))),
+        None => ("Home session", None),
+    };
+    let job = new_job(JobKind::Session, owner, label.to_string());
     save(root, &job)?;
     let mut command = tmux(root);
     command
+        .arg("-f")
+        .arg(&config)
         .args(["new-session", "-d", "-s", &job.id, "-c"])
-        .arg(&paths.source);
+        .arg(&directory);
     for (key, value) in env {
         command.arg("-e").arg(format!("{key}={value}"));
     }
@@ -419,6 +527,42 @@ pub fn signal_group(pid: u32, start: u64, signal: i32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sessions_get_color_mouse_and_the_login_shell() {
+        let config = tmux_config("/usr/bin/bash", "tmux-256color");
+        for line in [
+            "set -g default-shell \"/usr/bin/bash\"",
+            "set -g default-terminal \"tmux-256color\"",
+            "set -as terminal-features \",*:RGB\"",
+            "set -s escape-time 10",
+            "set -g mouse on",
+        ] {
+            assert!(
+                config.lines().any(|l| l == line),
+                "missing {line}\n{config}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_plain_absolute_shells_are_written_into_the_config() {
+        assert!(usable_shell("/bin/sh"));
+        assert!(!usable_shell("bash"));
+        assert!(!usable_shell("/bin/sh\" ; evil"));
+        assert!(!usable_shell("/bin/$SHELL"));
+        assert!(!usable_shell("/no/such/shell"));
+    }
+
+    #[test]
+    fn a_missing_or_plain_locale_is_not_utf8() {
+        for locale in ["en_US.UTF-8", "C.utf8", "de_DE.utf-8"] {
+            assert!(is_utf8(Some(locale)), "{locale}");
+        }
+        for locale in [None, Some("C"), Some("POSIX"), Some("en_US.ISO-8859-1")] {
+            assert!(!is_utf8(locale), "{locale:?}");
+        }
+    }
     use crate::testing::Root;
 
     fn running(root: &Path, pid: Option<u32>, start: Option<u64>) -> Job {
