@@ -415,7 +415,7 @@ pub fn session(root: &Path, agent: &str, project: Option<&str>) -> anyhow::Resul
     let created = command.output();
     let place = owner.map(|(_, name)| name).unwrap_or("home");
     let _ = tmux(root)
-        .args(["set-option", "-t", &format!("={}", job.id), "@slingshot"])
+        .args(["set-option", "-t", &job.id, "@slingshot"])
         .arg(session_label(agent, place))
         .output();
     let failure = match &created {
