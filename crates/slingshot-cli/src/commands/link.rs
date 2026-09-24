@@ -96,6 +96,13 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
     }
     presentation::detail("Saved", home_path(&saved));
     eprintln!();
+
+    if let Err(error) = super::tools::offer(config.resolve(Some(&name))?).await {
+        presentation::warning(format!(
+            "Could not set up tools on {name}: {error:#}. Run slingshot tools to try again"
+        ));
+    }
+    eprintln!();
     eprintln!(
         "  Try it: {}",
         Style::stderr().paint("slingshot run uname -n", Tone::Info)

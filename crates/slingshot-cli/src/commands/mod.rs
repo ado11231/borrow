@@ -7,5 +7,6 @@ pub mod menubar;
 pub mod ps;
 pub mod run;
 pub mod sync;
+pub mod tools;
 pub mod top;
 pub mod unlink;

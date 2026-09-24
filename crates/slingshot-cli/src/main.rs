@@ -86,6 +86,9 @@ enum Commands {
     #[command(about = "Remove Slingshot access and this machine's environment files from a box")]
     Unlink,
 
+    #[command(about = "Install the developer tools this machine uses on the Agent, after asking")]
+    Tools,
+
     /// `trailing_var_arg` stops clap parsing after `run`, so flags like `--release`
     /// reach the remote program untouched rather than being claimed by slingshot.
     #[command(about = "Sync the project, then run a command on the Agent")]
@@ -223,6 +226,7 @@ async fn main() {
         Commands::Start { name, port } => slingshot_agent::start(name, port).await,
         Commands::Link { code, name } => commands::link::link(code, name).await,
         Commands::Unlink => commands::unlink::unlink(cli.agent).await,
+        Commands::Tools => commands::tools::tools(cli.agent).await,
         Commands::Run { cmd } => commands::run::run(cli.agent, cmd).await,
         Commands::Attach { path } => commands::attach::attach(cli.agent, path).await,
         Commands::Sync { pull, check, path } => {
