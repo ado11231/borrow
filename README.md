@@ -1,65 +1,54 @@
-# Slingshot
+<h1 align="center">Slingshot</h1>
 
-## How to run
+<p align="center">Use the CPU, RAM, and GPU of a powerful machine from your laptop, without leaving your own editor and terminal.</p>
 
-Use two computers on the same network with Rust installed on both. The Agent needs an SSH server, rsync, and tmux. The Client needs rsync.
+<br>
 
-From the Slingshot repository on each computer:
+**1. Install Slingshot On Both Machines**
 
 ```sh
-cargo build
-export PATH="$PWD/target/debug:$PATH"
+git clone https://github.com/ado11231/slingshot.git
+cd slingshot
+cargo install --path crates/slingshot-cli
 ```
 
-Start Slingshot on the Agent:
+**2. Start The Agent On The Powerful Machine**
 
 ```sh
 slingshot start
 ```
 
-Follow any setup instructions it prints. Keep it running.
-
-On the Client, use the pairing code printed by the Agent:
+**3. Link The Machine You Work On, Using The Printed Code**
 
 ```sh
 slingshot link <code>
 ```
 
-Then open your project folder and run:
+**4. Run Work From Your Project Folder**
 
 ```sh
 slingshot run cargo build
 ```
 
-## Commands
+**5. Open A Session That Survives Disconnects**
 
-1. `slingshot start` starts the Agent.
-2. `slingshot link <code>` pairs the computers.
-3. `slingshot run <command>` copies project changes to the Agent, then runs the command there.
-4. `slingshot attach` opens or rejoins a persistent session for the project.
-5. `slingshot sync` copies project changes to the Agent. Its pull option retrieves Agent edits, and its check option previews without changing anything.
-6. `slingshot env add`, `slingshot env list`, and `slingshot env remove` manage environment files kept on the Agent.
-7. `slingshot ps` lists runs and sessions.
-8. `slingshot stop <id>` stops a run or session.
-9. `slingshot info` shows machine specifications.
-10. `slingshot health` shows current resource use. Its watch option keeps it updating.
-11. `slingshot top` shows live resource use with active jobs.
-12. `slingshot unlink` removes the pairing.
-13. `slingshot help <command>` shows every option.
+```sh
+slingshot attach
+```
 
-## Phases
+**6. Show The Agent In Your Menu Bar On macOS**
 
-1. Setup and Phase 0: Complete. Prepared the machines and tested the idea.
-2. Phase 1: Complete. Pairing, remote commands, information, and health.
-3. Phase 2: Replaced. Its project detection and separate build output continue in Phase 3, where source copies replaced its project mount.
-4. Phase 3: Complete. Source copies, sync, sessions, job control, environment files, and live status, accepted on two real machines.
-5. Cleanup: Complete. Comments, formatting, naming, dead code, and documentation.
-6. Phase 4: Planned. Connections across networks.
-7. Phase 5: Planned. Notifications and port forwarding.
-8. Phase 6: Planned. Model workloads and broader platform support.
-9. Phase 7: Planned. Installers and public releases.
+```sh
+mac/menubar/build.sh
+slingshot menubar
+```
 
-## Known gaps
+<br>
 
-1. `slingshot.toml` reads `sync.exclude` only. Split overrides are not applied yet.
-2. File watchers in sessions, several Clients on one Agent, and large Node and Python projects are untested.
+<p align="center">
+  <a href="docs/USAGE.md">Usage</a> ·
+  <a href="docs/TROUBLESHOOTING.md">Troubleshooting</a> ·
+  <a href="docs/ARCHITECTURE.md">Architecture</a> ·
+  <a href="docs/ROADMAP.md">Roadmap</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
