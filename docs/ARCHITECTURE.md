@@ -253,7 +253,14 @@ sequenceDiagram
   2. If the connection drops, the Agent stops it and records it as interrupted.
 * A **session** comes from `slingshot attach`.
   1. It is a `tmux` session that keeps running after you disconnect.
-  2. It is the right choice for long work.
+  2. Inside a project, it works in the project copy, reached through a link at `~/Slingshot/<project>` so the prompt stays readable.
+  3. Outside a project, it works in the Agent's home folder and copies nothing.
+  4. Each project has one session, and the home folder has one.
+* An open session does not block syncing or runs. It is a place to work, like a terminal on the Client. A run does block other syncs and runs, because it owns the project copy while it works.
+* Sessions use Slingshot's own `tmux` server and settings, so a personal `tmux` setup is never touched:
+  1. The account's login shell, read from the user database, so startup files and tools load.
+  2. A full color terminal type and a `UTF-8` locale.
+  3. Mouse scrolling, a short Escape delay, and a quiet bar showing the Agent and the project.
 * The Agent keeps a record of every job.
 * `slingshot stop <id>` asks a job to finish, then forces it after five seconds.
 * Before stopping a process, the Agent checks its ID and its start time, so it never stops an unrelated program that reused an old ID.

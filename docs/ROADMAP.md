@@ -72,10 +72,13 @@
   1. A macOS menu bar app showing CPU, RAM, GPU, VRAM, and workspace space.
   2. An offline screen with the cause, the fix, and a Try again button.
   3. Notifications for finished, failed, and interrupted runs, the Agent going offline or returning, and low memory, low disk, or a hot GPU.
+  4. `slingshot attach` from anywhere: a project session, or a home session outside a project.
+  5. Every `attach` syncs first. `sync`, `sync --pull`, and `run` work while a session is open.
+  6. Sessions start in the login shell with full color, `UTF-8`, mouse scrolling, a quiet bar, and a readable `~/Slingshot/<project>` path.
 * **Remaining:**
   1. Automatic port forwarding, so the Agent's port 3000 appears at `localhost:3000` on the Client.
   2. Notifications when a server is ready and when a job waits for input.
-  3. A rework of `slingshot attach`, which works but feels slow and unclear.
+  3. Set up the Client's tools on the Agent during linking, with sign in, and `slingshot tools` to repeat it later.
 
 ## Planned
 
@@ -98,7 +101,7 @@
 ## Known Limitations
 
 * `slingshot start` does not start on its own when the Agent restarts.
-* `slingshot attach` feels slow and unclear. Some tools, such as Codex, did not run inside a session, likely because of the session's shell or terminal settings.
+* Tools used in a session must be installed on the Agent by hand until the tools setup step exists. Codex was not installed on archbox.
 * File watchers inside sessions, several Clients on one Agent account, and large Node and Python projects are untested.
 * `slingshot.toml` supports only `sync.exclude`. Other settings have no effect.
 * Pairing across networks is not supported. Both machines must share a network or tailnet to link.
@@ -134,3 +137,7 @@
 2. With `slingshot start` stopped, the offline screen named the cause and offered `slingshot start`, then returned to live values on its own.
 3. Real runs produced the right notifications: finished, failed, and interrupted, and none for a quick `echo hi`.
 4. The offline notification appeared when `slingshot start` was stopped.
+5. `slingshot attach` outside a project opened the home session in `~`, with full color, `UTF-8`, mouse scrolling, Claude Code, and `docker ps` working.
+6. `slingshot attach` in a project synced first, including into a session already running, and a fresh session showed `~/Slingshot/slingshot` in the prompt.
+7. `cargo build` in a project session ran on archbox. The menu bar showed CPU rise, and archbox's fans spun up while the Mac stayed quiet.
+8. With the session still open, `slingshot sync --pull` brought a file made on archbox back to the Mac.

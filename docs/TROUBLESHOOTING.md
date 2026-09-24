@@ -153,7 +153,7 @@
 ### No Project Found
 
 * **Message:** `No project found`
-* **Meaning:** `attach`, `sync`, and `env` need a project, and this folder is not in one.
+* **Meaning:** `sync` and `env` need a project, and this folder is not in one. `attach` works anywhere, and opens the home session outside a project.
 * **Fix:** Move into a Git repository, or a folder with `Cargo.toml`, `package.json`, `pyproject.toml`, `requirements.txt`, or `slingshot.toml`.
 
 ### Run Lost Its Connection
@@ -161,6 +161,12 @@
 * **Message:** `Lost connection to archbox. The Agent stops the run once it notices`
 * **Meaning:** A run stops when its connection drops.
 * **Fix:** Check how it ended with `slingshot ps --all`. Use `slingshot attach` for work that must keep going.
+
+### Command Not Found In A Session
+
+* **Message:** `command not found`, for a tool that works on the Client
+* **Meaning:** A session runs on the Agent, so it can only use tools installed there.
+* **Fix:** Install the tool on the Agent, then sign in to it there if it needs an account.
 
 ### Session Lost Its Connection
 

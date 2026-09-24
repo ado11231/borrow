@@ -154,7 +154,7 @@
 
 ### Formats And Versions
 
-* **Control messages:** any change to a `Request` or `Response` shape in `slingshot-core/src/control.rs` raises `control::VERSION`, currently 5.
+* **Control messages:** any change to a `Request` or `Response` shape in `slingshot-core/src/control.rs` raises `control::VERSION`, currently 6.
 * **Menu bar lines:** if a field in `slingshot-cli/src/watch/event.rs` changes meaning or is removed, raise `watch::event::VERSION` and change `mac/menubar/Sources/Model.swift` in the same commit.
 * **Pairing messages:** changes to `slingshot-core/src/protocol.rs` force every user to link again. Say so explicitly.
 
@@ -307,7 +307,7 @@
 ## 15. Current State
 
 * **Phases 1 and 3 are complete.** Phase 4, reaching the Agent from any network, is in final testing. Phase 5 is in progress: the menu bar app and notifications are built, and automatic port forwarding is not.
-* **200 tests pass**, and formatting and Clippy pass.
+* **206 tests pass**, and formatting and Clippy pass.
 * **The rename from borrow has no migration.** Both machines must run `slingshot link` again after updating.
 * Everything under [known limitations](docs/ROADMAP.md#known-limitations) does not work yet. Never describe it as working.
 * The full [test record](docs/ROADMAP.md#test-record) is in the roadmap.

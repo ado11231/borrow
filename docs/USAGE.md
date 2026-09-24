@@ -98,20 +98,33 @@
 
 ### Open A Session
 
-* Open a lasting terminal on the Agent for your project:
+* Open a lasting terminal on the Agent:
 
   ```sh
   slingshot attach
   ```
 
-* The first time, it also copies the project.
-* The session keeps running when you disconnect or lose your network.
-* Run `slingshot attach` again to return to it.
-* To leave without stopping it, press Ctrl B, then D.
+* Where it opens depends on where you run it:
+
+| Run It From | You Get |
+| --- | --- |
+| Inside a project | A session in the Agent's copy of the project, at `~/Slingshot/<project>` on the Agent. |
+| Anywhere else | A session in the Agent's home folder. Nothing is copied. |
+
+* **Every `attach` in a project copies your latest edits first**, including when you return to a session that is already running.
+* If that copy hits a conflict, Slingshot warns you and still opens the session.
+* The session keeps running when you disconnect or lose your network. Run `slingshot attach` again to return to it.
+* Each project has one session, and the home folder has one session.
+* Inside a session:
+  1. Scroll back through output with your trackpad or mouse.
+  2. The bar at the bottom shows the Agent and the project, such as `▶ archbox · app`.
+  3. To leave without stopping it, press Ctrl B, then D.
+  4. To end it, type `exit`, or run `slingshot stop <id>` from the Client.
+* Tools you run in a session, such as Claude Code, Codex, or Docker, must be installed on the Agent.
 
 | Option | Effect |
 | --- | --- |
-| `[path]` | The project folder. The default is the current project. |
+| `[path]` | Open the session for this project folder instead of the current folder. |
 
 ## Keep Files In Step
 
@@ -124,6 +137,7 @@
 | `slingshot sync --check` | Shows what a sync would change, without changing anything. |
 | `slingshot sync --pull --check` | Shows what a pull would change, without changing anything. |
 
+* Syncing works while a session is open, so you can pull a coding agent's edits back without stopping it.
 * **Edits made on only one machine are kept.** A normal sync leaves an edit made only on the Agent alone, and tells you so you can pull it.
 * **A conflict stops the sync.** If a file changed differently on both machines, nothing is copied. To fix it:
   1. Make each listed file match on both machines, or undo one of the edits.
