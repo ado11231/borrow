@@ -5,7 +5,9 @@ use crate::jobs;
 use anyhow::{Context, bail, ensure};
 use serde::{Deserialize, Serialize};
 use slingshot_core::artifacts::{self, Layout};
-use slingshot_core::control::{JobKind, MAX_ENVIRONMENT_FILE, ProjectInfo, ProjectRef, Snapshot};
+use slingshot_core::control::{
+    Job, JobKind, MAX_ENVIRONMENT_FILE, ProjectInfo, ProjectRef, Snapshot,
+};
 use slingshot_core::source::{self, Manifest, Rules};
 use slingshot_core::sync::{self, StateDir};
 use slingshot_core::{stack, storage};
@@ -116,15 +118,35 @@ pub fn load(root: &Path, id: &str) -> anyhow::Result<(Paths, Metadata)> {
     Ok((paths, metadata))
 }
 
-/// Hold the project lock and confirm no run or session is active.
-pub fn acquire_idle(root: &Path, paths: &Paths, metadata: &Metadata) -> anyhow::Result<File> {
+/// Which active jobs stop other work on a project. A run owns the project copy while it
+/// works, so nothing else may change it. A session is a place to work, like a terminal on
+/// the Client, so syncing and running beside it are allowed. Unlinking waits for both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Blocking {
+    Runs,
+    AllJobs,
+}
+
+fn blocker(active: &[Job], blocking: Blocking) -> Option<&Job> {
+    active
+        .iter()
+        .find(|job| blocking == Blocking::AllJobs || job.kind == JobKind::Run)
+}
+
+/// Hold the project lock and confirm no job that `blocking` names is active.
+pub fn acquire(
+    root: &Path,
+    paths: &Paths,
+    metadata: &Metadata,
+    blocking: Blocking,
+) -> anyhow::Result<File> {
     let active = jobs::active_for(root, &metadata.id)?;
     let lock = storage::try_lock(&paths.lock())?;
     let describe = |kind: JobKind| match kind {
         JobKind::Run => "a run",
         JobKind::Session => "a session",
     };
-    if let Some(job) = active.first() {
+    if let Some(job) = blocker(&active, blocking) {
         bail!(
             "{} has {} in progress (job {}). Stop it with slingshot stop {} or wait for it to finish",
             metadata.name,
@@ -140,7 +162,7 @@ pub fn acquire_idle(root: &Path, paths: &Paths, metadata: &Metadata) -> anyhow::
         );
     };
     ensure!(
-        jobs::active_for(root, &metadata.id)?.is_empty(),
+        blocker(&jobs::active_for(root, &metadata.id)?, blocking).is_none(),
         "{} started other work just now. Try again",
         metadata.name
     );
@@ -188,7 +210,7 @@ pub fn begin(
     pull: bool,
 ) -> anyhow::Result<(Lease, Snapshot)> {
     let (paths, metadata) = load(root, id)?;
-    let lock = acquire_idle(root, &paths, &metadata)?;
+    let lock = acquire(root, &paths, &metadata, Blocking::Runs)?;
     let state = paths.sync_state();
     sync::recover(&paths.source, &state)?;
     let rules = Rules::new(&paths.source, &excludes)?;
@@ -349,7 +371,7 @@ pub fn env_add(
     );
     source::environment_target(target)?;
     let (paths, metadata) = load(root, id)?;
-    let _lock = acquire_idle(root, &paths, &metadata)?;
+    let _lock = acquire(root, &paths, &metadata, Blocking::Runs)?;
     ensure_ready(&paths, &metadata)?;
     storage::private_dir(&paths.environment)?;
 
@@ -391,7 +413,7 @@ pub fn env_list(root: &Path, id: &str) -> anyhow::Result<Vec<String>> {
 pub fn env_remove(root: &Path, id: &str, target: &str) -> anyhow::Result<()> {
     source::environment_target(target)?;
     let (paths, metadata) = load(root, id)?;
-    let _lock = acquire_idle(root, &paths, &metadata)?;
+    let _lock = acquire(root, &paths, &metadata, Blocking::Runs)?;
     let names: Vec<String> = storage::read_json(&paths.names())?;
     ensure!(
         names.iter().any(|n| n == target),
@@ -429,7 +451,7 @@ pub fn unlink(root: &Path, ids: &[String]) -> anyhow::Result<usize> {
         let Some(metadata) = metadata else {
             continue;
         };
-        let lock = acquire_idle(root, &paths, &metadata)?;
+        let lock = acquire(root, &paths, &metadata, Blocking::AllJobs)?;
         held.push((paths, lock));
     }
     let mut removed = 0;
@@ -448,6 +470,23 @@ mod tests {
     use super::*;
     use crate::testing::Root;
     use std::os::unix::fs::PermissionsExt;
+
+    fn active(kind: JobKind) -> Job {
+        crate::jobs::new_job(kind, Some(("p", "app")), "work".into())
+    }
+
+    #[test]
+    fn a_session_blocks_only_unlinking_while_a_run_blocks_everything() {
+        let session = [active(JobKind::Session)];
+        assert!(blocker(&session, Blocking::Runs).is_none());
+        assert!(blocker(&session, Blocking::AllJobs).is_some());
+        let both = [active(JobKind::Session), active(JobKind::Run)];
+        assert_eq!(
+            blocker(&both, Blocking::Runs).map(|job| job.kind),
+            Some(JobKind::Run)
+        );
+        assert!(blocker(&[], Blocking::AllJobs).is_none());
+    }
 
     fn project(root: &Path) -> String {
         let id = storage::new_id();

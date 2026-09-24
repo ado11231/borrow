@@ -226,7 +226,7 @@ pub fn session(root: &Path, project: &str) -> anyhow::Result<SessionInfo> {
             created: false,
         });
     }
-    let _lock = match projects::acquire_idle(root, &paths, &metadata) {
+    let _lock = match projects::acquire(root, &paths, &metadata, projects::Blocking::Runs) {
         Ok(lock) => lock,
         Err(error) => match existing(root)? {
             Some(job) => {

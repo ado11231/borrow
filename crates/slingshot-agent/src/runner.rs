@@ -29,7 +29,12 @@ pub async fn run(
     let directory = match &project {
         Some(id) => {
             let (paths, metadata) = projects::load(&root, id)?;
-            lock = Some(projects::acquire_idle(&root, &paths, &metadata)?);
+            lock = Some(projects::acquire(
+                &root,
+                &paths,
+                &metadata,
+                projects::Blocking::Runs,
+            )?);
             projects::ensure_ready(&paths, &metadata)?;
             env = projects::prepare_artifacts(&paths)?;
             named = Some((metadata.id.clone(), metadata.name.clone()));
