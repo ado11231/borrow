@@ -353,7 +353,8 @@ pub fn hash_file(path: &Path) -> anyhow::Result<String> {
     Ok(hex(&hasher.finalize()))
 }
 
-fn digest(bytes: &[u8]) -> String {
+/// A SHA256 fingerprint of `bytes`, in lowercase hex.
+pub fn digest(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }
 

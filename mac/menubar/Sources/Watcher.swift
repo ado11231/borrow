@@ -110,7 +110,7 @@ final class Watcher {
             case .status(let status): apply(status)
             case .notice(let notice): onNotice?(notice)
             case .unsupported(let version):
-                problem = "Slingshot speaks format \(version), this app speaks \(supportedVersion). Update the app with mac/menubar/build.sh."
+                problem = "Slingshot speaks format \(version), this app speaks \(supportedVersion). Update the app with: slingshot menubar"
             }
         }
     }
