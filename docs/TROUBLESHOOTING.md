@@ -1,0 +1,302 @@
+# Troubleshooting
+
+* What each Slingshot error message means, and how to fix it.
+* Search this page for the words on your screen. Each entry shows the exact message.
+
+## Contents
+
+1. [Starting The Agent](#starting-the-agent)
+2. [Linking](#linking)
+3. [Reaching The Agent](#reaching-the-agent)
+4. [Running Commands](#running-commands)
+5. [Syncing Files](#syncing-files)
+6. [Jobs](#jobs)
+7. [GPU](#gpu)
+8. [The Menu Bar App](#the-menu-bar-app)
+9. [Removing Slingshot](#removing-slingshot)
+10. [Getting Help](#getting-help)
+
+## Starting The Agent
+
+### SSH Server Not Running
+
+* **Message:** `SSH server not running`
+* **Meaning:** Slingshot sends all work over ssh, so the Agent needs an ssh server. The Client does not.
+* **Fix:**
+  1. On macOS, turn on System Settings, then General, then Sharing, then Remote Login.
+  2. On Linux, run `sudo systemctl enable --now sshd`.
+
+### Missing Tool
+
+* **Message:** `Tool not installed: rsync` or `Tool not installed: tmux`
+* **Meaning:** `rsync` copies files, and `tmux` keeps sessions running. The Agent needs both.
+* **Fix:** Run the install command Slingshot printed, then run `slingshot start` again.
+
+### Already Running
+
+* **Message:** `Another slingshot start is already running for this account`
+* **Meaning:** Only one `slingshot start` can run per user account.
+* **Fix:** Use the one already running, or stop it with Ctrl C and start again.
+
+### Port In Use
+
+* **Message:** `Could not listen on any address; is port 7433 already in use?`
+* **Meaning:** Another program is using the pairing port.
+* **Fix:** Choose another port with `slingshot start --port 7434`.
+
+### Cannot Keep The Agent Awake
+
+* **Message:** `Could not stop this machine from sleeping`
+* **Meaning:** A warning. If the Agent sleeps, nothing can reach it until it wakes.
+* **Fix:** Change the Agent's power settings so it stays awake.
+
+### No Relay Answered
+
+* **Message:** `No iroh relay answered`
+* **Meaning:** A warning. Machines on other networks cannot reach the Agent yet. The same network still works, and Slingshot keeps trying.
+* **Fix:** Check the Agent's internet connection.
+
+### Unreachable After A Restart
+
+* **Meaning:** `slingshot start` does not yet start on its own when the Agent turns on.
+* **Fix:** Log in to the Agent and run `slingshot start`.
+
+## Linking
+
+### Cannot Reach The Agent To Pair
+
+* **Message:** `Could not reach 192.168.1.9:7433`
+* **Meaning:** The Client could not contact the Agent.
+* **Fix:**
+  1. Check that `slingshot start` is running on the Agent.
+  2. Check that both machines are on the same network or tailnet. Linking across networks is not supported yet.
+
+### Code Expired Or Used
+
+* **Message:** `That pairing code has expired or was already used`
+* **Meaning:** Each code works once and lasts 10 minutes.
+* **Fix:** Stop `slingshot start` with Ctrl C, and run it again for a new code.
+
+### Wrong Code
+
+* **Message:** `That pairing code is not right`
+* **Meaning:** The code does not match the one the Agent expects.
+* **Fix:** Copy the code again, exactly as printed.
+
+### Not A Pairing Code
+
+* **Message:** `That does not look like a pairing code`
+* **Meaning:** A code has three parts separated by colons, such as `192.168.1.9:7433:K7QW9ZR2`.
+* **Fix:** Copy the whole code from the Agent's screen.
+
+## Reaching The Agent
+
+* When the Agent does not answer, Slingshot tries the local network, then the tailnet, then iroh.
+* The message describes why the last attempt failed.
+
+### Off Or Asleep
+
+* **Message:** `archbox is not reachable. It may be off or asleep, or slingshot start is not running there`
+* **Meaning:** Nothing answered on any path.
+* **Fix:** Make sure the Agent is on and awake, and `slingshot start` is running.
+
+### Slingshot Stopped On The Agent
+
+* **Message:** `Slingshot is not running on the Agent. Run slingshot start there`
+* **Meaning:** The Agent is on, but `slingshot start` has stopped.
+* **Fix:** Run `slingshot start` on the Agent.
+
+### No Longer Paired
+
+* **Message:** `archbox no longer accepts this machine`
+* **Meaning:** The Agent no longer recognizes this Client, usually after an unlink or a reset.
+* **Fix:** Link again from the same network as the Agent, with `slingshot link <new code>`.
+
+### No Internet On This Machine
+
+* **Message:** `Could not reach archbox, because this machine cannot reach iroh's relays`
+* **Meaning:** The Client has no working internet connection.
+* **Fix:** Check this machine's connection, then try again.
+
+### Versions Differ
+
+* **Message:** `Slingshot versions differ between the machines`
+* **Meaning:** The two machines run versions that cannot talk to each other.
+* **Fix:** Update Slingshot on both machines. Link again if Slingshot asks you to.
+
+### Slingshot Missing On The Agent
+
+* **Message:** `Slingshot was not found on the Agent`
+* **Meaning:** The `slingshot` program on the Agent was moved or removed.
+* **Fix:** Install Slingshot on the Agent again, then run `slingshot link` again.
+
+### Agent Identity Changed
+
+* **Message:** `Host key verification failed`
+* **Meaning:** The Agent's ssh identity changed, usually after a system reinstall.
+* **Fix:** Link again so the Client learns the new identity.
+
+### No Agent Linked
+
+* **Message:** `No Agent configured yet`
+* **Meaning:** This machine has not been linked.
+* **Fix:** Run `slingshot start` on the Agent, then `slingshot link <code>` here.
+
+### Several Agents Linked
+
+* **Message:** `Several Agents configured`
+* **Meaning:** More than one Agent is linked, and none is the default.
+* **Fix:** Add `--agent <name>`, or set `default = "<name>"` in the config file the message names.
+
+## Running Commands
+
+### No Project Found
+
+* **Message:** `No project found`
+* **Meaning:** `attach`, `sync`, and `env` need a project, and this folder is not in one.
+* **Fix:** Move into a Git repository, or a folder with `Cargo.toml`, `package.json`, `pyproject.toml`, `requirements.txt`, or `slingshot.toml`.
+
+### Run Lost Its Connection
+
+* **Message:** `Lost connection to archbox. The Agent stops the run once it notices`
+* **Meaning:** A run stops when its connection drops.
+* **Fix:** Check how it ended with `slingshot ps --all`. Use `slingshot attach` for work that must keep going.
+
+### Session Lost Its Connection
+
+* **Message:** `Lost connection to archbox. The session keeps running there`
+* **Meaning:** The session is still running on the Agent.
+* **Fix:** Run `slingshot attach` to return to it.
+
+### Low Memory Or Disk
+
+* **Message:** `RAM is 92% used` or `Only 1.2 GiB free on the Agent workspace disk`
+* **Meaning:** A warning before a run. The run still starts, but may be slow, fail, or be stopped.
+* **Fix:** Free memory or disk space on the Agent.
+
+### No Swap
+
+* **Message:** `No swap configured`
+* **Meaning:** The Agent has no swap, the disk space a system uses when RAM runs out. A large job may be stopped when memory fills.
+* **Fix:** Add swap space on the Agent.
+
+### Needs A Terminal
+
+* **Message:** `Live views need an interactive terminal`
+* **Meaning:** `slingshot health --watch` and `slingshot top` redraw the screen, which needs a real terminal.
+* **Fix:** Run them in a terminal, or use `slingshot health` to save or pipe the output.
+
+## Syncing Files
+
+### Conflict
+
+* **Message:** `These paths changed differently on this machine and archbox`
+* **Meaning:** The same files changed on both machines in different ways. Nothing was copied.
+* **Fix:**
+  1. Compare both sides with `slingshot sync --check` and `slingshot sync --pull --check`.
+  2. Make each listed file match on both machines, or undo one edit.
+  3. Run the sync again.
+
+### Interrupted Sync
+
+* **Message:** `An interrupted sync needs recovery. Run slingshot sync to recover it`
+* **Meaning:** A sync stopped partway, for example when the connection dropped.
+* **Fix:** Run `slingshot sync`. It finishes or safely undoes the earlier sync.
+
+### Recovery Failed
+
+* **Message:** `Could not recover an interrupted sync. Backups are in ...`
+* **Meaning:** Slingshot could not finish or undo the sync, and kept backups in the folder named.
+* **Fix:** Make each listed file match its backup, or delete it, then sync again.
+
+### No Copy Yet
+
+* **Message:** `This project has no copy on the Agent yet. Run slingshot sync first`
+* **Meaning:** A pull needs a copy on the Agent.
+* **Fix:** Run `slingshot sync` once.
+
+### Unsafe Path Or Link
+
+* **Message:** `Unsupported source path` or `Unsafe source link`
+* **Meaning:** A file name or link cannot be copied safely, such as a link pointing outside the project.
+* **Fix:** Remove it, or add it to `.gitignore`.
+
+### Too Many Files
+
+* **Message:** `Message is too large. The project may have too many files`
+* **Meaning:** The project's file list is over the limit.
+* **Fix:** Leave out large generated or data folders with `.gitignore` or `sync.exclude`.
+
+### Negated Exclude Pattern
+
+* **Message:** `sync.exclude in slingshot.toml cannot contain negated patterns`
+* **Meaning:** Patterns beginning with `!` are not allowed in `sync.exclude`.
+* **Fix:** Remove them.
+
+## Jobs
+
+### No Matching Job
+
+* **Message:** `No running Slingshot job matches abc123`
+* **Meaning:** No running job has that ID. Finished jobs cannot be stopped.
+* **Fix:** Copy the ID from `slingshot ps`.
+
+## GPU
+
+### Driver Mismatch
+
+* **Message:** `NVIDIA driver and library versions differ`
+* **Meaning:** The NVIDIA driver was updated, but the old one is still loaded.
+* **Fix:** Restart the Agent.
+
+### No GPU Data
+
+* **Message:** `No GPU data available`
+* **Meaning:** The Agent has no NVIDIA card, or `nvidia-smi` is not installed.
+* **Fix:** None needed. Slingshot works without a GPU.
+
+## The Menu Bar App
+
+### App Not Installed
+
+* **Message:** `Slingshot.app is not installed`
+* **Meaning:** `slingshot menubar` could not find the app.
+* **Fix:** From the Slingshot source folder, run `mac/menubar/build.sh`, then `slingshot menubar`.
+
+### App Cannot Find Slingshot
+
+* **Message:** The panel asks you to run `slingshot menubar` once from a terminal.
+* **Meaning:** Apps started at login cannot find the `slingshot` program on their own.
+* **Fix:** Run `slingshot menubar`. Run it again after moving or reinstalling `slingshot`.
+
+### Shown As Offline
+
+* **Meaning:** The app cannot reach the Agent.
+* **Fix:** Open the panel. It shows the cause and the fix. It updates by itself when the Agent answers, or press Try again.
+
+### No Notifications
+
+* **Meaning:** Notifications are off, or nothing has happened that needs one. Runs under 10 seconds never notify, and each warning is sent once until it clears.
+* **Fix:** Turn them on in System Settings, then Notifications, then Slingshot.
+
+## Removing Slingshot
+
+### Key Still Installed
+
+* **Message:** `Could not reach archbox, so the key is still there`
+* **Meaning:** `slingshot unlink` could not reach the Agent to remove this machine's key.
+* **Fix:** On the Agent, open `~/.ssh/authorized_keys` and delete the line ending with the name in the message.
+
+### Job Still Running
+
+* **Meaning:** `slingshot unlink` will not run while a job is active.
+* **Fix:** Stop each job with `slingshot stop <id>`, then unlink.
+
+## Getting Help
+
+* Open an issue on GitHub with:
+  1. The command you ran.
+  2. What you expected.
+  3. The full output.
+  4. The operating system of each machine.
+* [CONTRIBUTING.md](../CONTRIBUTING.md#reporting-a-problem) has the full list.
