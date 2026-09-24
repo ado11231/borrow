@@ -324,6 +324,19 @@ async fn scan_local(
     .await?
 }
 
+/// Paths changed differently on both machines. Its own type, so a caller such as
+/// `attach` can tell a conflict apart from a failed connection.
+#[derive(Debug)]
+pub struct Conflicts(String);
+
+impl std::fmt::Display for Conflicts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Conflicts {}
+
 fn refuse_conflicts(plan: &Plan, agent: &str) -> anyhow::Result<()> {
     if plan.conflicts.is_empty() {
         return Ok(());
@@ -333,10 +346,11 @@ fn refuse_conflicts(plan: &Plan, agent: &str) -> anyhow::Result<()> {
         .iter()
         .map(|name| format!("  {name}"))
         .collect();
-    bail!(
+    Err(Conflicts(format!(
         "These paths changed differently on this machine and {agent}:\n{}\nNothing was changed. Make each path match on both machines, or undo one side's edit, then sync again. Compare with slingshot sync --check and slingshot sync --pull --check",
         listed.join("\n")
-    )
+    ))
+    .into())
 }
 
 fn regular_files(plan: &Plan, sender: &Manifest) -> Vec<String> {
@@ -592,7 +606,9 @@ mod tests {
             conflicts: vec!["src/main.rs".into()],
             ..Plan::default()
         };
-        let error = refuse_conflicts(&plan, "archbox").unwrap_err().to_string();
+        let error = refuse_conflicts(&plan, "archbox").unwrap_err();
+        assert!(error.downcast_ref::<Conflicts>().is_some());
+        let error = error.to_string();
         assert!(error.contains("  src/main.rs"));
         assert!(error.contains("Nothing was changed"));
     }
