@@ -80,6 +80,8 @@
   swift build -c release --package-path mac/menubar
   ```
 
+* CI runs the same checks, and the menu bar build, on Linux and macOS for every pull request.
+
 * **Where tests live:**
   1. Unit tests sit at the bottom of the file they test, in a `tests` module.
   2. Tests that run the finished program live in `crates/slingshot-cli/tests/`.

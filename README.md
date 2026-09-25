@@ -1,5 +1,7 @@
 <h1 align="center">Slingshot</h1>
 
+<p align="center"><a href="https://github.com/ado11231/slingshot/actions/workflows/ci.yml"><img src="https://github.com/ado11231/slingshot/actions/workflows/ci.yml/badge.svg" alt="CI"></a></p>
+
 <p align="center">Use the CPU, RAM, and GPU of a powerful machine from your laptop, without leaving your own editor and terminal.</p>
 
 ## What It Does
