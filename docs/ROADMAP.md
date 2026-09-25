@@ -2,7 +2,7 @@
 
 * What Slingshot does today, what has been tested, and what comes next.
 * A feature is listed as complete only after it has run on real machines.
-* Last updated September 23, 2026.
+* Last updated September 24, 2026.
 
 ## Contents
 
@@ -75,10 +75,12 @@
   4. `slingshot attach` from anywhere: a project session, or a home session outside a project.
   5. Every `attach` syncs first. `sync`, `sync --pull`, and `run` work while a session is open.
   6. Sessions start in the login shell with full color, `UTF-8`, mouse scrolling, a quiet bar, and a readable `~/Slingshot/<project>` path.
+  7. `slingshot menubar` builds, signs, and installs the app itself, and rebuilds it only when its source changed.
+  8. `link` ends by offering to install the Client's tools on the Agent, then starts the sign in for Claude Code and Codex. `slingshot tools` repeats it later. Not yet run on real machines.
 * **Remaining:**
   1. Automatic port forwarding, so the Agent's port 3000 appears at `localhost:3000` on the Client.
   2. Notifications when a server is ready and when a job waits for input.
-  3. Set up the Client's tools on the Agent during linking, with sign in, and `slingshot tools` to repeat it later.
+  3. Test the tools step on real machines.
 
 ## Planned
 
@@ -101,7 +103,8 @@
 ## Known Limitations
 
 * `slingshot start` does not start on its own when the Agent restarts.
-* Tools used in a session must be installed on the Agent by hand until the tools setup step exists. Codex was not installed on archbox.
+* The tools step has not run on real machines. Only its failure when the Agent is off has been seen.
+* The tools step installs Docker only with `pacman`, `apt`, `dnf`, and `zypper`, and Git, Node, and Python only with the package managers it knows.
 * File watchers inside sessions, several Clients on one Agent account, and large Node and Python projects are untested.
 * `slingshot.toml` supports only `sync.exclude`. Other settings have no effect.
 * Pairing across networks is not supported. Both machines must share a network or tailnet to link.
@@ -141,3 +144,12 @@
 6. `slingshot attach` in a project synced first, including into a session already running, and a fresh session showed `~/Slingshot/slingshot` in the prompt.
 7. `cargo build` in a project session ran on archbox. The menu bar showed CPU rise, and archbox's fans spun up while the Mac stayed quiet.
 8. With the session still open, `slingshot sync --pull` brought a file made on archbox back to the Mac.
+
+### Phase 5: September 24, 2026, Mac Only
+
+* archbox was off, so only the Mac was tested.
+
+1. `slingshot menubar` built, signed, and installed the app in 12 seconds, then opened it.
+2. A second `slingshot menubar` skipped the build and took under a second.
+3. After a change to the app's Swift source, `slingshot menubar` rebuilt the app on its own.
+4. `slingshot tools` with archbox off failed after about 34 seconds with `archbox is not reachable`.
