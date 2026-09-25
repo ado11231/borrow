@@ -77,8 +77,7 @@
 
 * **Remaining:**
 
-1. Test a lost connection during a build over iroh.
-2. Test an Agent restart over iroh.
+1. Test a connection lost for more than 3 minutes during a build over iroh. A drop of about 15 seconds did not interrupt a run.
 
 ### Phase 5: Polish
 
@@ -91,13 +90,14 @@
 5. Every `attach` syncs first. `sync`, `sync --pull`, and `run` work while a session is open.
 6. Sessions start in the login shell with full color, `UTF-8`, mouse scrolling, a quiet bar, and a readable `~/Slingshot/<project>` path.
 7. `slingshot menubar` builds, signs, and installs the app itself, and rebuilds it only when its source changed.
-8. `link` ends by offering to install the Client's tools on the Agent, then starts the sign in for Claude Code and Codex. `slingshot tools` repeats it later. Not yet run on real machines.
+8. `link` ends by offering to install the Client's tools on the Agent, then starts the sign in for Claude Code and Codex. `slingshot tools` repeats it later.
 
 * **Remaining:**
 
 1. Automatic port forwarding, so the Agent's port 3000 appears at `localhost:3000` on the Client.
 2. Notifications when a server is ready and when a job waits for input.
-3. Test the tools step on real machines.
+3. Find tools installed in per user folders such as `~/.local/bin`. Today Claude Code installs there on Arch Linux and is then reported as missing, which also skips its sign in.
+4. Clearer tools output: a warning symbol for missing tools, one readable command per tool, and installer output set apart.
 
 ## Planned
 
@@ -120,12 +120,14 @@
 ## Known Limitations
 
 * `slingshot start` does not start on its own when the Agent restarts.
-* The tools step has not run on real machines. Only its failure when the Agent is off has been seen.
+* The tools step does not find tools installed in per user folders such as `~/.local/bin` when that folder is not on the Agent's login PATH. Claude Code is one. Run it inside `slingshot attach` instead, which does find it.
+* The first connection over iroh after the Agent restarts can take about 13 seconds. Later ones take about 1 second.
+* A run stopped with `slingshot stop` is reported as failed, with exit code 130.
+* Edits a coding agent makes on the Agent stay there until `slingshot sync --pull`.
 * The tools step installs Docker only with `pacman`, `apt`, `dnf`, and `zypper`, and Git, Node, and Python only with the package managers it knows.
-* File watchers inside sessions, several Clients on one Agent account, and large Node and Python projects are untested. Each Client now links under a unique name, but two Clients have not been linked to one Agent yet.
+* File watchers inside sessions, several Clients on one Agent account, and large Node and Python projects are untested. Each Client now links under a unique name, but two Clients have not been linked to one Agent at the same time yet.
 * `slingshot.toml` supports only `sync.exclude`. Other settings have no effect.
 * Pairing across networks is not supported. Both machines must share a network or tailnet to link.
-* The new pairing has only been tested on one Mac. A successful link between two machines with it has not been run yet.
 * The notifications for an Agent coming back online, and the resource warnings, have not been seen on real machines.
 
 ## Test Record
@@ -181,3 +183,20 @@
 3. The recorded traffic held neither the code nor any of the wrong guesses.
 4. An old style pairing request was refused with an instruction to update, even with the right code.
 5. The new Client linking to an Agent built from the previous version was told to update that Agent.
+
+### Fresh Install: September 25, 2026
+
+* The Mac's Slingshot key, data, app, and program were moved to a backup. A new account, `slingtest`, on archbox played the Agent of someone who had never used Slingshot.
+* Both machines followed only the README, from a fresh clone.
+
+1. On `slingtest`, `cargo install` first failed until `rustup default stable` was run, and `~/.cargo/bin` had to be added to the PATH. Both come from Arch Linux's `rustup` package.
+2. `slingshot start` passed every check, found the GPU, reached iroh, and printed codes for the local network and the tailnet.
+3. A wrong code was refused. The right code paired in 0.1 seconds with a unique Client name.
+4. The tools step offered Claude Code and Codex with their commands and asked once. Codex installed with `sudo` and signed in from the Mac's browser through the forwarded port. Claude Code installed into `~/.local/bin` but was reported as missing, because that folder was not on the login PATH.
+5. `slingshot run cargo build --release` took 54 seconds on archbox, against 3 minutes 20 seconds on the Mac. The second run took 0.6 seconds.
+6. `health`, `ps --all`, `env add`, `stop`, `attach` with leaving and returning, `sync --pull` of a file made in a session, and `slingshot menubar` all worked. The menu bar app built in 12 seconds.
+7. On a phone hotspot, runs went through iroh with Tailscale off, and through the tailnet with it on.
+8. Wi Fi turned off for about 15 seconds during a 2 minute run over iroh did not interrupt it.
+9. After `slingshot start` was restarted, the Mac reconnected over iroh without linking again. The first connection took 13 seconds.
+10. `unlink` refused while a session was open, then removed only this Client's key, iroh access, and environment file.
+11. Linking the new Client to an Agent running the previous version printed an instruction to update that Agent.
