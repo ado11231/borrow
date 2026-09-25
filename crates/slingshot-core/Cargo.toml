@@ -13,6 +13,8 @@ rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+hmac = { workspace = true }
+spake2 = { workspace = true }
 sysinfo = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }

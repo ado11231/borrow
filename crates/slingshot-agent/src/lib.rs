@@ -14,14 +14,16 @@ use slingshot_core::keys;
 use slingshot_core::network::Network;
 use slingshot_core::preflight;
 use slingshot_core::presentation::{self, Style, Tone};
-use slingshot_core::protocol::{Paired, Request, Response};
+use slingshot_core::protocol::{Handshake, Joining, Paired, Request, Response, Side};
 use slingshot_core::step;
 use slingshot_core::telemetry;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{info, warn};
 
@@ -39,11 +41,29 @@ const CODE_LENGTH: usize = 8;
 const PAIRING_LIMIT: u64 = 64 * 1024;
 const PAIRING_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Wrong codes a pairing code survives. Each one is a single online guess, so three
+/// leave a guesser almost no chance, while a mistyped code can still be fixed.
+const WRONG_CODE_LIMIT: u32 = 3;
+
+/// What an older Client sees, since it cannot take part in the handshake.
+const UPDATE_CLIENT: &str = "This Agent needs a newer Slingshot. Update Slingshot on this machine, then run slingshot link again";
+
 /// The one time token that lets a Client install its key. Single use: pairing
 /// consumes it, and there is no way to ask the daemon what it was.
 struct Pairing {
     token: String,
     expires: Instant,
+    wrong: u32,
+}
+
+impl Pairing {
+    fn new() -> Pairing {
+        Pairing {
+            token: new_token(),
+            expires: Instant::now() + CODE_LIFETIME,
+            wrong: 0,
+        }
+    }
 }
 
 /// Everything the daemon needs while it runs. The name is chosen here and travels
@@ -55,6 +75,8 @@ struct Agent {
     root: PathBuf,
     iroh: String,
     pairing: Mutex<Option<Pairing>>,
+    /// True while a handshake is under way. One at a time, so guesses cannot run in parallel.
+    exchanging: AtomicBool,
 }
 
 /// Start the daemon: run the checks, print a pairing code, then listen.
@@ -71,7 +93,8 @@ pub async fn start(name: Option<String>, port: u16) -> anyhow::Result<i32> {
     let root = service::root()?;
     let identity = slingshot_core::tunnel::identity(&root)?;
     let user = whoami().context("Could not work out which user is running the daemon")?;
-    let token = new_token();
+    let pairing = Pairing::new();
+    let token = pairing.token.clone();
     let addresses = bind_addresses(port);
 
     let agent = Arc::new(Agent {
@@ -84,10 +107,8 @@ pub async fn start(name: Option<String>, port: u16) -> anyhow::Result<i32> {
             .collect(),
         root,
         iroh: identity.public().to_string(),
-        pairing: Mutex::new(Some(Pairing {
-            token: token.clone(),
-            expires: Instant::now() + CODE_LIFETIME,
-        })),
+        pairing: Mutex::new(Some(pairing)),
+        exchanging: AtomicBool::new(false),
     });
 
     let endpoint = tunnel::start(identity, agent.root.clone()).await?;
@@ -125,6 +146,7 @@ pub async fn start(name: Option<String>, port: u16) -> anyhow::Result<i32> {
 
     report_reach(&endpoint).await;
     announce(&name, &addresses, &token);
+    tokio::spawn(new_codes_on_enter(Arc::clone(&agent), addresses));
 
     tokio::signal::ctrl_c().await.ok();
     eprintln!();
@@ -149,6 +171,18 @@ async fn report_reach(endpoint: &iroh::Endpoint) {
     }
 }
 
+/// Replace the pairing code each time Enter is pressed, for linking another machine or after
+/// a code was burned. Stops quietly when there is no terminal to read.
+async fn new_codes_on_enter(agent: Arc<Agent>, addresses: Vec<SocketAddr>) {
+    let mut lines = BufReader::new(tokio::io::stdin()).lines();
+    while let Ok(Some(_)) = lines.next_line().await {
+        let pairing = Pairing::new();
+        let token = pairing.token.clone();
+        *agent.pairing.lock().expect("pairing lock was poisoned") = Some(pairing);
+        announce(&agent.name, &addresses, &token);
+    }
+}
+
 /// Take connections forever, one task each, so a slow Client never blocks another.
 async fn accept_loop(listener: TcpListener, agent: Arc<Agent>) {
     loop {
@@ -156,7 +190,7 @@ async fn accept_loop(listener: TcpListener, agent: Arc<Agent>) {
             Ok((stream, peer)) => {
                 let agent = Arc::clone(&agent);
                 tokio::spawn(async move {
-                    if let Err(e) = handle(stream, agent).await {
+                    if let Err(e) = handle(stream, peer, agent).await {
                         warn!("request from {peer} failed: {e:#}");
                     }
                 });
@@ -166,102 +200,166 @@ async fn accept_loop(listener: TcpListener, agent: Arc<Agent>) {
     }
 }
 
-/// Read one request, write one response. Anything that goes wrong comes back as an
-/// Error response rather than a dropped connection, so the Client can explain it.
-async fn handle(mut stream: TcpStream, agent: Arc<Agent>) -> anyhow::Result<()> {
-    let mut line = String::new();
-    let mut reader = BufReader::new((&mut stream).take(PAIRING_LIMIT));
-    tokio::time::timeout(PAIRING_TIMEOUT, reader.read_line(&mut line))
-        .await
-        .context("Pairing request timed out")??;
+/// One pairing: `Start` and `Join` on the same connection. Anything that goes wrong comes
+/// back as an Error response rather than a dropped connection, so the Client can explain it.
+async fn handle(stream: TcpStream, peer: SocketAddr, agent: Arc<Agent>) -> anyhow::Result<()> {
+    let (reader, mut writer) = stream.into_split();
+    let mut reader = BufReader::new(reader.take(PAIRING_LIMIT));
 
-    let response = match serde_json::from_str::<Request>(line.trim()) {
-        Ok(request) => answer(request, &agent),
-        Err(e) => Response::Error {
-            message: format!("Could not understand that request: {e}"),
-        },
-    };
-
-    let mut reply = serde_json::to_string(&response)?;
-    reply.push('\n');
-    stream.write_all(reply.as_bytes()).await?;
-
-    Ok(())
-}
-
-fn answer(request: Request, agent: &Agent) -> Response {
-    match request {
-        Request::Info | Request::Health => Response::Error {
-            message: "This Agent answers info and health only over SSH. Update Slingshot on the Client and run slingshot link again".to_string(),
-        },
-        Request::Pair {
-            token,
-            client,
-            public_key,
-            iroh,
-            ..
-        } => pair(
-            agent,
-            &token,
-            &Client {
-                name: client,
-                public_key,
-                iroh,
-            },
-        ),
-    }
-}
-
-/// Client identity received during pairing. The Client also sends its own account name
-/// and host keys, which nothing needs now that trust runs one way.
-struct Client {
-    name: String,
-    public_key: String,
-    iroh: Option<String>,
-}
-
-fn pair(agent: &Agent, token: &str, client: &Client) -> Response {
-    let claimed = {
-        let mut slot = agent.pairing.lock().expect("pairing lock was poisoned");
-
-        match slot.as_ref() {
-            None => None,
-            Some(p) if Instant::now() > p.expires => {
-                *slot = None;
-                None
+    let response = match receive(&mut reader).await? {
+        Err(message) => error(message),
+        Ok(Request::Start { spake }) => match open(&agent) {
+            Err(message) => error(message),
+            Ok((token, handshake, ours, _exchange)) => {
+                send(&mut writer, &Response::Start { spake: ours }).await?;
+                match receive(&mut reader).await? {
+                    Err(message) => error(message),
+                    Ok(joining) => join(&agent, &token, handshake, &spake, joining, peer),
+                }
             }
-            Some(p) if p.token != token => Some(false),
-            Some(_) => {
-                *slot = None;
-                Some(true)
-            }
+        },
+        Ok(Request::Info | Request::Health | Request::Pair {}) => error(UPDATE_CLIENT),
+        Ok(Request::Join { .. }) => {
+            error("Pairing must begin with a handshake. Run slingshot link again")
         }
     };
 
-    match claimed {
-        None => Response::Error {
-            message: "That pairing code has expired or was already used; run slingshot start again for a fresh one".to_string(),
+    send(&mut writer, &response).await
+}
+
+/// Read one request, or the sentence explaining why it could not be understood.
+async fn receive(
+    reader: &mut BufReader<tokio::io::Take<OwnedReadHalf>>,
+) -> anyhow::Result<Result<Request, String>> {
+    let mut line = String::new();
+    tokio::time::timeout(PAIRING_TIMEOUT, reader.read_line(&mut line))
+        .await
+        .context("Pairing request timed out")??;
+    Ok(serde_json::from_str::<Request>(line.trim())
+        .map_err(|e| format!("Could not understand that request: {e}")))
+}
+
+async fn send(writer: &mut OwnedWriteHalf, response: &Response) -> anyhow::Result<()> {
+    let mut reply = serde_json::to_string(response)?;
+    reply.push('\n');
+    writer.write_all(reply.as_bytes()).await?;
+    Ok(())
+}
+
+fn error(message: impl Into<String>) -> Response {
+    Response::Error {
+        message: message.into(),
+    }
+}
+
+/// Clears `exchanging` when a handshake ends, however it ends.
+struct Exchange(Arc<Agent>);
+
+impl Drop for Exchange {
+    fn drop(&mut self) {
+        self.0.exchanging.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Begin a handshake with the current code, if there is one and no other handshake is
+/// under way. Returns the code it used, so `join` can tell if the code changed meanwhile.
+fn open(agent: &Arc<Agent>) -> Result<(String, Handshake, Vec<u8>, Exchange), String> {
+    let token = {
+        let mut slot = agent.pairing.lock().expect("pairing lock was poisoned");
+        if slot.as_ref().is_some_and(|p| Instant::now() > p.expires) {
+            *slot = None;
+        }
+        match slot.as_ref() {
+            Some(pairing) => pairing.token.clone(),
+            None => return Err(EXPIRED.to_string()),
+        }
+    };
+    if agent.exchanging.swap(true, Ordering::SeqCst) {
+        return Err("Another machine is pairing right now. Try again in a few seconds".to_string());
+    }
+    let exchange = Exchange(Arc::clone(agent));
+    let (handshake, ours) = Handshake::agent(&token);
+    Ok((token, handshake, ours, exchange))
+}
+
+const EXPIRED: &str = "That pairing code has expired or was already used. Press Enter where slingshot start is running for a new one";
+
+/// Check the Client's proof, then use up the code and install the Client's keys. A wrong
+/// proof counts against the code, and the last allowed one burns it.
+fn join(
+    agent: &Agent,
+    token: &str,
+    handshake: Handshake,
+    theirs: &[u8],
+    request: Request,
+    peer: SocketAddr,
+) -> Response {
+    let Request::Join { details, proof } = request else {
+        return error("Pairing stopped halfway. Run slingshot link again");
+    };
+    let key = match handshake.finish(theirs) {
+        Ok(key) => key,
+        Err(e) => return error(format!("{e:#}. Run slingshot link again")),
+    };
+
+    let right = key.check(Side::Client, &details, &proof);
+    {
+        let mut slot = agent.pairing.lock().expect("pairing lock was poisoned");
+        let current = slot
+            .as_mut()
+            .filter(|p| p.token == token && Instant::now() <= p.expires);
+        match (current, right) {
+            (None, _) => return error(EXPIRED),
+            (Some(pairing), false) => {
+                pairing.wrong += 1;
+                let wrong = pairing.wrong;
+                if wrong >= WRONG_CODE_LIMIT {
+                    *slot = None;
+                    presentation::warning(format!(
+                        "{wrong} wrong pairing codes from {}. The code no longer works. Press Enter for a new one",
+                        peer.ip()
+                    ));
+                } else {
+                    presentation::warning(format!(
+                        "Wrong pairing code from {} ({wrong} of {WRONG_CODE_LIMIT})",
+                        peer.ip()
+                    ));
+                }
+                return error("That pairing code is not right");
+            }
+            (Some(_), true) => *slot = None,
+        }
+    }
+
+    let joining: Joining = match serde_json::from_str(&details) {
+        Ok(joining) => joining,
+        Err(e) => return error(format!("Could not understand the Client's details: {e}")),
+    };
+    let paired = match accept(agent, &joining) {
+        Ok(paired) => paired,
+        Err(e) => return error(format!("Could not finish pairing: {e:#}")),
+    };
+    match serde_json::to_string(&paired) {
+        Ok(details) => Response::Paired {
+            proof: key.prove(Side::Agent, &details),
+            details,
         },
-        Some(false) => Response::Error { message: "That pairing code is not right".to_string() },
-        Some(true) => match accept(agent, client) {
-            Ok(paired) => Response::Paired(Box::new(paired)),
-            Err(e) => Response::Error { message: format!("Could not finish pairing: {e:#}") },
-        },
+        Err(e) => error(format!("Could not send the pairing details: {e}")),
     }
 }
 
 /// Authorize the Client key for SSH execution and private control, and its iroh key for
 /// reaching sshd from other networks. An older Client without an iroh key pairs as before.
-fn accept(agent: &Agent, client: &Client) -> anyhow::Result<Paired> {
+fn accept(agent: &Agent, client: &Joining) -> anyhow::Result<Paired> {
     if let Some(iroh) = &client.iroh {
-        clients::allow(&agent.root, &client.name, iroh)
+        clients::allow(&agent.root, &client.client, iroh)
             .context("Could not record the Client's iroh key")?;
     }
-    let authorized = keys::authorize(&client.name, &client.public_key)
+    let authorized = keys::authorize(&client.client, &client.public_key)
         .context("Could not add the Client's key to authorized_keys")?;
 
-    info!("paired with {}", client.name);
-    presentation::success(format!("Paired with {}", client.name));
+    info!("paired with {}", client.client);
+    presentation::success(format!("Paired with {}", client.client));
     presentation::detail("Authorized", presentation::home_path(&authorized));
 
     Ok(Paired {
@@ -375,11 +473,132 @@ fn announce(name: &str, addresses: &[SocketAddr], token: &str) {
     eprintln!(
         "  {}",
         style.dim(format!(
-            "The code works once and expires in {} minutes. Press Ctrl C to stop",
+            "The code works once and expires in {} minutes. Press Enter for a new code, or Ctrl C to stop",
             CODE_LIFETIME.as_secs() / 60
         ))
     );
     eprintln!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::Root;
+
+    fn agent(root: &Root, pairing: Pairing) -> Arc<Agent> {
+        Arc::new(Agent {
+            name: "archbox".to_string(),
+            user: "me".to_string(),
+            addresses: Vec::new(),
+            root: root.0.clone(),
+            iroh: String::new(),
+            pairing: Mutex::new(Some(pairing)),
+            exchanging: AtomicBool::new(false),
+        })
+    }
+
+    fn code(token: &str) -> Pairing {
+        Pairing {
+            token: token.to_string(),
+            expires: Instant::now() + CODE_LIFETIME,
+            wrong: 0,
+        }
+    }
+
+    /// A full handshake where the Client typed `typed`, stopped before any keys are installed
+    /// unless the code was right.
+    fn attempt(agent: &Arc<Agent>, typed: &str) -> Response {
+        let (token, handshake, to_client, _exchange) = open(agent).unwrap();
+        let (client, to_agent) = Handshake::client(typed);
+        let key = client.finish(&to_client).unwrap();
+        let details = r#"{"client":"laptop","public_key":"","iroh":null}"#.to_string();
+        let proof = key.prove(Side::Client, &details);
+        let peer = SocketAddr::from(([192, 168, 1, 40], 50000));
+        join(
+            agent,
+            &token,
+            handshake,
+            &to_agent,
+            Request::Join { details, proof },
+            peer,
+        )
+    }
+
+    fn message(response: Response) -> String {
+        match response {
+            Response::Error { message } => message,
+            other => panic!("expected an error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn three_wrong_codes_burn_the_code() {
+        let root = Root::new();
+        let agent = agent(&root, code("K7QW9ZR2"));
+
+        for _ in 0..WRONG_CODE_LIMIT {
+            assert!(message(attempt(&agent, "K7QW9ZR3")).contains("not right"));
+        }
+
+        assert!(agent.pairing.lock().unwrap().is_none());
+        assert!(open(&agent).is_err());
+    }
+
+    #[test]
+    fn a_wrong_code_below_the_limit_leaves_the_code_usable() {
+        let root = Root::new();
+        let agent = agent(&root, code("K7QW9ZR2"));
+
+        attempt(&agent, "K7QW9ZR3");
+
+        assert_eq!(agent.pairing.lock().unwrap().as_ref().unwrap().wrong, 1);
+        assert!(open(&agent).is_ok());
+    }
+
+    #[test]
+    fn only_one_handshake_runs_at_a_time() {
+        let root = Root::new();
+        let agent = agent(&root, code("K7QW9ZR2"));
+
+        let first = open(&agent).unwrap();
+        assert!(open(&agent).err().unwrap().contains("Another machine"));
+        drop(first);
+        assert!(open(&agent).is_ok());
+    }
+
+    #[test]
+    fn an_expired_code_refuses_to_start() {
+        let root = Root::new();
+        let mut expired = code("K7QW9ZR2");
+        expired.expires = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        let agent = agent(&root, expired);
+
+        assert_eq!(open(&agent).err().unwrap(), EXPIRED);
+    }
+
+    #[test]
+    fn a_code_replaced_during_the_handshake_is_refused() {
+        let root = Root::new();
+        let agent = agent(&root, code("K7QW9ZR2"));
+        let (token, handshake, to_client, _exchange) = open(&agent).unwrap();
+        *agent.pairing.lock().unwrap() = Some(code("NEWCODE2"));
+
+        let (client, to_agent) = Handshake::client("K7QW9ZR2");
+        let key = client.finish(&to_client).unwrap();
+        let details = "{}".to_string();
+        let proof = key.prove(Side::Client, &details);
+        let peer = SocketAddr::from(([192, 168, 1, 40], 50000));
+        let response = join(
+            &agent,
+            &token,
+            handshake,
+            &to_agent,
+            Request::Join { details, proof },
+            peer,
+        );
+
+        assert_eq!(message(response), EXPIRED);
+    }
 }
 
 #[cfg(test)]

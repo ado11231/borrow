@@ -7,7 +7,7 @@ use slingshot_core::config::{Agent, Config};
 use slingshot_core::keys as core_keys;
 use slingshot_core::preflight::{self, Check, State};
 use slingshot_core::presentation::{self, Style, Tone, home_path};
-use slingshot_core::protocol::{Request, Response};
+use slingshot_core::protocol::Joining;
 use slingshot_core::step;
 use slingshot_core::tunnel;
 
@@ -38,23 +38,17 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
     let (private_key, public_key) = keys::ensure(&client_name)?;
     let identity = tunnel::identity(&project::client_root()?)?;
 
-    let response = client::pair(
+    let paired = client::pair(
         &host,
         port,
-        Request::Pair {
-            token,
+        &token,
+        &Joining {
             client: client_name.clone(),
             public_key,
-            user: this_user(),
-            host_keys: core_keys::host_keys(),
             iroh: Some(identity.public().to_string()),
         },
     )
     .await?;
-
-    let Response::Paired(paired) = response else {
-        anyhow::bail!("The Agent returned an unexpected response while pairing");
-    };
 
     let name = name.unwrap_or(paired.name.clone());
     let ssh_port = None;
@@ -138,13 +132,6 @@ fn parse_code(code: &str) -> anyhow::Result<(String, u16, String)> {
         .map_err(|_| anyhow::anyhow!("'{port}' is not a port number"))?;
 
     Ok((host.to_string(), port, token.to_string()))
-}
-
-/// This account's name, sent for compatibility with older Agents.
-fn this_user() -> String {
-    std::env::var("USER")
-        .or_else(|_| std::env::var("LOGNAME"))
-        .unwrap_or_else(|_| "unknown".to_string())
 }
 
 #[cfg(test)]

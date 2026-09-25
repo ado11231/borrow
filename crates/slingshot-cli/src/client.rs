@@ -16,38 +16,81 @@ use tokio::net::TcpStream;
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::task::JoinHandle;
 
-/// Send one pairing request to a daemon and wait for its answer.
+/// Pair with a daemon using the code it printed. The code itself is never sent: both sides
+/// prove they know it, and the Agent's details are trusted only after its proof checks out.
 pub async fn pair(
     host: &str,
     port: u16,
-    message: protocol::Request,
-) -> anyhow::Result<protocol::Response> {
-    let mut stream =
-        tokio::time::timeout(Duration::from_secs(10), TcpStream::connect((host, port)))
-            .await
-            .with_context(|| format!("Timed out reaching the slingshot daemon at {host}:{port}"))?
-            .with_context(|| format!("Could not reach the slingshot daemon at {host}:{port}"))?;
+    code: &str,
+    joining: &protocol::Joining,
+) -> anyhow::Result<protocol::Paired> {
+    let stream = tokio::time::timeout(Duration::from_secs(10), TcpStream::connect((host, port)))
+        .await
+        .with_context(|| format!("Timed out reaching the slingshot daemon at {host}:{port}"))?
+        .with_context(|| format!("Could not reach the slingshot daemon at {host}:{port}"))?;
+    let (reader, mut writer) = stream.into_split();
+    let mut reader = BufReader::new(reader.take(1024 * 1024));
 
-    let mut line = serde_json::to_string(&message).context("Could not encode the request")?;
+    let (handshake, ours) = protocol::Handshake::client(code);
+    exchange(&mut writer, &protocol::Request::Start { spake: ours }).await?;
+    let theirs = match answer(&mut reader).await? {
+        protocol::Response::Start { spake } => spake,
+        protocol::Response::Error { message } if message.starts_with("Could not understand") => {
+            anyhow::bail!(
+                "The Agent at {host} runs an older Slingshot. Update Slingshot there, restart slingshot start, then link again"
+            )
+        }
+        other => return Err(unexpected_pairing(other)),
+    };
+    let key = protocol::Handshake::finish(handshake, &theirs)?;
+
+    let details =
+        serde_json::to_string(joining).context("Could not encode this machine's details")?;
+    let proof = key.prove(protocol::Side::Client, &details);
+    exchange(&mut writer, &protocol::Request::Join { details, proof }).await?;
+    let (details, proof) = match answer(&mut reader).await? {
+        protocol::Response::Paired { details, proof } => (details, proof),
+        other => return Err(unexpected_pairing(other)),
+    };
+    if !key.check(protocol::Side::Agent, &details, &proof) {
+        anyhow::bail!(
+            "Could not confirm that {host} is the Agent that printed this code. Check the code and try again. If it keeps failing, another machine on this network may be answering in its place"
+        );
+    }
+    serde_json::from_str(&details).context("Could not understand the Agent's pairing details")
+}
+
+async fn exchange(
+    writer: &mut tokio::net::tcp::OwnedWriteHalf,
+    request: &protocol::Request,
+) -> anyhow::Result<()> {
+    let mut line = serde_json::to_string(request).context("Could not encode the request")?;
     line.push('\n');
-    stream
+    writer
         .write_all(line.as_bytes())
         .await
-        .context("Could not send the request")?;
+        .context("Could not send the pairing request")
+}
 
+async fn answer(
+    reader: &mut BufReader<tokio::io::Take<tokio::net::tcp::OwnedReadHalf>>,
+) -> anyhow::Result<protocol::Response> {
     let mut reply = String::new();
-    let mut reader = BufReader::new((&mut stream).take(1024 * 1024));
     tokio::time::timeout(Duration::from_secs(60), reader.read_line(&mut reply))
         .await
         .context("The Agent did not answer the pairing request")?
         .context("The Agent closed the connection without answering")?;
+    serde_json::from_str(reply.trim()).context("Could not understand the daemon's answer")
+}
 
-    let response: protocol::Response =
-        serde_json::from_str(reply.trim()).context("Could not understand the daemon's answer")?;
-
+/// An Agent error passes through as written. Anything else means the two sides disagree
+/// about the order of pairing messages.
+fn unexpected_pairing(response: protocol::Response) -> anyhow::Error {
     match response {
-        protocol::Response::Error { message } => anyhow::bail!("{message}"),
-        other => Ok(other),
+        protocol::Response::Error { message } => anyhow::anyhow!("{message}"),
+        _ => anyhow::anyhow!(
+            "The Agent answered pairing out of order. Update Slingshot on both machines, then link again"
+        ),
     }
 }
 

@@ -1,12 +1,19 @@
 //! Pairing messages, sent as newline separated JSON over TCP. Everything after pairing
 //! uses the authenticated control channel in `control`.
+//!
+//! The pairing code never crosses the network. Both sides turn it into a shared key with
+//! SPAKE2, then prove what they send with that key. Someone watching learns nothing they
+//! can use, and a machine pretending to be the Agent cannot prove it knows the code.
 
+use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use spake2::{Ed25519Group, Identity, Password, Spake2};
 
 /// Default Agent control port.
 pub const DEFAULT_PORT: u16 = 7433;
 
-/// What the Client asks for.
+/// What the Client sends. A pairing is `Start`, then `Join`, on one connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Request {
@@ -14,30 +21,119 @@ pub enum Request {
     /// an instruction to update.
     Info,
     Health,
-    /// Trade a pairing token for an installed key. Single use. `user` and `host_keys`
-    /// describe the Client and are kept for compatibility with older Agents.
-    Pair {
-        token: String,
-        client: String,
-        public_key: String,
-        user: String,
-        host_keys: Vec<String>,
-        /// The Client's iroh public key, which the Agent will accept connections from.
-        #[serde(default)]
-        iroh: Option<String>,
+    /// Retired. Older Clients sent the code itself here. Its fields are ignored, so the
+    /// daemon can still answer it with an instruction to update.
+    Pair {},
+    /// The Client's first SPAKE2 message.
+    Start {
+        spake: Vec<u8>,
+    },
+    /// The Client's details as JSON text, and its proof over that exact text.
+    Join {
+        details: String,
+        proof: Vec<u8>,
     },
 }
 
-/// What the Agent answers. Pairing is all this port does, so the only outcomes are a
-/// successful pairing and an `Error` carrying a sentence meant for a human.
+/// What the Agent answers. Every failure is an `Error` carrying a sentence meant for a human.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Response {
-    /// Boxed because it carries the box's full specs, which dwarf an error message.
-    Paired(Box<Paired>),
+    /// The Agent's first SPAKE2 message.
+    Start {
+        spake: Vec<u8>,
+    },
+    /// A `Paired` as JSON text, and the Agent's proof over that exact text.
+    Paired {
+        details: String,
+        proof: Vec<u8>,
+    },
     Error {
         message: String,
     },
+}
+
+/// Who the Client is, sent in `Join`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Joining {
+    pub client: String,
+    pub public_key: String,
+    /// The Client's iroh public key, which the Agent will accept connections from.
+    pub iroh: Option<String>,
+}
+
+/// Which side made a proof. Each side proves with its own label, so a proof cannot be
+/// sent back to the side that made it.
+#[derive(Debug, Clone, Copy)]
+pub enum Side {
+    Client,
+    Agent,
+}
+
+impl Side {
+    fn label(self) -> &'static [u8] {
+        match self {
+            Side::Client => b"slingshot client",
+            Side::Agent => b"slingshot agent",
+        }
+    }
+}
+
+/// One side of a SPAKE2 exchange, started from the pairing code.
+pub struct Handshake(Spake2<Ed25519Group>);
+
+impl Handshake {
+    /// Start as the Client. Returns the message to send to the Agent.
+    pub fn client(code: &str) -> (Handshake, Vec<u8>) {
+        let (state, message) = Spake2::<Ed25519Group>::start_a(
+            &Password::new(code.as_bytes()),
+            &Identity::new(Side::Client.label()),
+            &Identity::new(Side::Agent.label()),
+        );
+        (Handshake(state), message)
+    }
+
+    /// Start as the Agent. Returns the message to send to the Client.
+    pub fn agent(code: &str) -> (Handshake, Vec<u8>) {
+        let (state, message) = Spake2::<Ed25519Group>::start_b(
+            &Password::new(code.as_bytes()),
+            &Identity::new(Side::Client.label()),
+            &Identity::new(Side::Agent.label()),
+        );
+        (Handshake(state), message)
+    }
+
+    /// Combine the other side's message into the shared key. Both sides get the same key
+    /// only when both used the same code.
+    pub fn finish(self, theirs: &[u8]) -> anyhow::Result<Key> {
+        self.0
+            .finish(theirs)
+            .map(Key)
+            .map_err(|error| anyhow::anyhow!("The pairing handshake was malformed: {error}"))
+    }
+}
+
+/// The key both sides share after a handshake.
+pub struct Key(Vec<u8>);
+
+impl Key {
+    fn mac(&self, side: Side, details: &str) -> Hmac<Sha256> {
+        let mut mac =
+            Hmac::<Sha256>::new_from_slice(&self.0).expect("HMAC accepts a key of any length");
+        mac.update(side.label());
+        mac.update(details.as_bytes());
+        mac
+    }
+
+    pub fn prove(&self, side: Side, details: &str) -> Vec<u8> {
+        self.mac(side, details).finalize().into_bytes().to_vec()
+    }
+
+    /// Whether `proof` was made by `side` over `details` with this key. The comparison
+    /// takes the same time however much of the proof matches.
+    pub fn check(&self, side: Side, details: &str, proof: &[u8]) -> bool {
+        self.mac(side, details).verify_slice(proof).is_ok()
+    }
 }
 
 /// Everything `link` needs to be able to reach the box from now on.
@@ -112,4 +208,73 @@ pub struct GpuHealth {
     pub vram_total_mib: Option<u64>,
     pub utilization_percent: Option<u32>,
     pub temperature_c: Option<u32>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn keys(client_code: &str, agent_code: &str) -> (Key, Key) {
+        let (client, to_agent) = Handshake::client(client_code);
+        let (agent, to_client) = Handshake::agent(agent_code);
+        (
+            client.finish(&to_client).unwrap(),
+            agent.finish(&to_agent).unwrap(),
+        )
+    }
+
+    #[test]
+    fn the_same_code_on_both_sides_proves_each_side_to_the_other() {
+        let (client, agent) = keys("K7QW9ZR2", "K7QW9ZR2");
+
+        let joining = client.prove(Side::Client, "laptop details");
+        assert!(agent.check(Side::Client, "laptop details", &joining));
+        let paired = agent.prove(Side::Agent, "agent details");
+        assert!(client.check(Side::Agent, "agent details", &paired));
+    }
+
+    #[test]
+    fn a_wrong_code_fails_on_both_sides() {
+        let (client, agent) = keys("K7QW9ZR3", "K7QW9ZR2");
+
+        assert!(!agent.check(
+            Side::Client,
+            "details",
+            &client.prove(Side::Client, "details")
+        ));
+        assert!(!client.check(Side::Agent, "details", &agent.prove(Side::Agent, "details")));
+    }
+
+    #[test]
+    fn a_proof_does_not_survive_changed_details() {
+        let (client, agent) = keys("K7QW9ZR2", "K7QW9ZR2");
+        let proof = client.prove(Side::Client, r#"{"client":"laptop"}"#);
+
+        assert!(!agent.check(Side::Client, r#"{"client":"attacker"}"#, &proof));
+    }
+
+    #[test]
+    fn a_proof_cannot_be_sent_back_as_the_other_side() {
+        let (client, _) = keys("K7QW9ZR2", "K7QW9ZR2");
+        let proof = client.prove(Side::Client, "details");
+
+        assert!(!client.check(Side::Agent, "details", &proof));
+    }
+
+    #[test]
+    fn a_malformed_handshake_message_is_an_error() {
+        let (client, _) = Handshake::client("K7QW9ZR2");
+
+        assert!(client.finish(b"short").is_err());
+    }
+
+    #[test]
+    fn an_old_pairing_request_is_still_recognized() {
+        let old = r#"{"kind":"pair","token":"K7QW9ZR2","client":"laptop","public_key":"ssh-ed25519 AAAA","user":"me","host_keys":[]}"#;
+
+        assert!(matches!(
+            serde_json::from_str::<Request>(old).unwrap(),
+            Request::Pair {}
+        ));
+    }
 }
