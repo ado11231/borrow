@@ -156,13 +156,13 @@
 
 * **Control messages:** any change to a `Request` or `Response` shape in `slingshot-core/src/control.rs` raises `control::VERSION`, currently 7.
 * **Menu bar lines:** if a field in `slingshot-cli/src/watch/event.rs` changes meaning or is removed, raise `watch::event::VERSION` and change `mac/menubar/Sources/Model.swift` in the same commit.
-* **Pairing messages:** changes to `slingshot-core/src/protocol.rs` force every user to link again. Say so explicitly.
+* **Pairing messages:** a change to the pairing messages in `slingshot-core/src/protocol.rs` means both machines must update before the next link. A change to `Specs` or `Health`, which are saved or sent after pairing, forces every user to link again. Say which one explicitly.
 
 ### Security
 
 * Never weaken these protections:
 
-1. Pairing codes work once and expire.
+1. Pairing codes never cross the network. They work once, expire, and are burned after 3 wrong tries. Both sides prove they know the code before anything is trusted.
 2. The daemon listens only on the machine itself and the local network, never on `0.0.0.0`.
 3. Installed keys are named so `unlink` can remove them.
 4. Arguments sent to the Agent are quoted one by one with `shell-words`, never joined into one shell command.
@@ -313,7 +313,7 @@
 ## 15. Current State
 
 * **Phases 1 and 3 are complete.** Phase 4, reaching the Agent from any network, is in final testing. Phase 5 is in progress: the menu bar app and notifications are built, and automatic port forwarding is not.
-* **224 tests pass**, and formatting and Clippy pass.
+* **237 tests pass**, and formatting and Clippy pass.
 * **The rename from borrow has no migration.** Both machines must run `slingshot link` again after updating.
 * Everything under [known limitations](docs/ROADMAP.md#known-limitations) does not work yet. Never describe it as working.
 * The full [test record](docs/ROADMAP.md#test-record) is in the roadmap.

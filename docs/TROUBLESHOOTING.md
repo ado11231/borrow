@@ -77,14 +77,38 @@
 ### Code Expired Or Used
 
 * **Message:** `That pairing code has expired or was already used`
-* **Meaning:** Each code works once and lasts 10 minutes.
-* **Fix:** Stop `slingshot start` with Ctrl C, and run it again for a new code.
+* **Meaning:** Each code works once, lasts 10 minutes, and is burned after 3 wrong tries.
+* **Fix:** Press Enter where `slingshot start` is running for a new code.
 
 ### Wrong Code
 
 * **Message:** `That pairing code is not right`
-* **Meaning:** The code does not match the one the Agent expects.
+* **Meaning:** The code does not match the one the Agent printed. After 3 wrong tries the code stops working.
 * **Fix:** Copy the code again, exactly as printed.
+
+### Wrong Codes On The Agent
+
+* **Message:** `Wrong pairing code from 192.168.1.40 (1 of 3)`, or `3 wrong pairing codes from 192.168.1.40. The code no longer works`
+* **Meaning:** A machine at that address tried a wrong code. If it was not you, someone on your network tried to pair.
+* **Fix:** Press Enter for a new code. Pair only with machines you recognize.
+
+### Could Not Confirm The Agent
+
+* **Message:** `Could not confirm that 192.168.1.9 is the Agent that printed this code`
+* **Meaning:** The machine that answered could not prove it knows the code. Usually the code was mistyped. Rarely, another machine on the network is answering in the Agent's place.
+* **Fix:** Check the code and try again. If it keeps failing on a network you trust, open an issue.
+
+### Different Slingshot Versions
+
+* **Message:** `The Agent at 192.168.1.9 runs an older Slingshot`, or `This Agent needs a newer Slingshot`
+* **Meaning:** Pairing changed, so both machines need the same version to link. Machines that are already linked keep working.
+* **Fix:** Update Slingshot on the machine the message names, restart `slingshot start` if it was the Agent, then link again.
+
+### Another Machine Is Pairing
+
+* **Message:** `Another machine is pairing right now`
+* **Meaning:** The Agent pairs with one machine at a time.
+* **Fix:** Wait a few seconds, then run `slingshot link` again.
 
 ### Not A Pairing Code
 

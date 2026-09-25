@@ -142,12 +142,15 @@ flowchart TD
 ### Pairing
 
 1. On the Agent, `slingshot start` prints a code such as `192.168.1.9:7433:K7QW9ZR2`: the address, the port, and a secret.
-2. On the Client, `slingshot link <code>` sends the secret and the Client's public ssh key.
-3. The Agent checks the secret, which works once and expires after 10 minutes.
-4. The Agent installs the key under a recognizable name, so it can be removed later.
-5. The Agent replies with its ssh identity, addresses, iroh identity, and hardware details.
-6. The Client saves them, and from then on reaches the Agent without asking you anything.
+2. On the Client, `slingshot link <code>` connects to that port. Both sides turn the secret into a shared key with SPAKE2, a method that never sends the secret itself.
+3. The Client sends its public ssh key and iroh identity, with a proof made from the shared key.
+4. The Agent checks the proof. The code works once, expires after 10 minutes, and is burned after 3 wrong tries.
+5. The Agent installs the key under a recognizable name, so it can be removed later.
+6. The Agent replies with its ssh identity, addresses, iroh identity, and hardware details, with its own proof.
+7. The Client checks that proof, so a machine pretending to be the Agent is caught. It saves the details, and from then on reaches the Agent without asking you anything.
 
+* Someone watching the network learns nothing they can use. A wrong guess only counts if it is sent to the Agent, which allows 3.
+* Pressing Enter where `slingshot start` runs replaces the code, for linking another machine or after a code was burned.
 * `slingshot unlink` reverses pairing. It removes the key, deletes this Client's environment files, and forgets the Agent.
 
 ### Control
@@ -307,7 +310,8 @@ flowchart LR
 
 ## Security
 
-* Pairing codes work once and expire after 10 minutes.
+* Pairing codes never cross the network. They work once, expire after 10 minutes, and are burned after 3 wrong tries.
+* Both sides prove they know the code, so a machine pretending to be the Agent is refused.
 * The daemon listens only on the machine itself and the local network.
 * The installed ssh key has a recognizable name, so `slingshot unlink` can remove it.
 * Arguments sent to the Agent are quoted one by one, and never joined into a single shell command.
@@ -366,7 +370,7 @@ slingshot/
 | File | Purpose | Uses | Used By |
 | --- | --- | --- | --- |
 | `lib.rs` | Lists the modules. | none | the other crates |
-| `protocol.rs` | Pairing messages, hardware details, and health values. | none | `config`, `control`, `telemetry`, Agent `lib`, several Client commands |
+| `protocol.rs` | Pairing messages and the SPAKE2 handshake, hardware details, and health values. | none | `config`, `control`, `telemetry`, Agent `lib`, several Client commands |
 | `control.rs` | Versioned control messages, job records, and message reading and writing. | `protocol`, `source`, `tools` | Agent `service`, `jobs`, `projects`, `runner`; Client `client`, `transfer`, most commands |
 | `config.rs` | The Client's saved Agents: loading, saving, and choosing one. | `network`, `protocol` | `keys` and nearly every Client file |
 | `network.rs` | Tells local, tailnet, and other addresses apart. | none | `config`, Agent `lib`, Client `route` |

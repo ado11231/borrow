@@ -104,7 +104,7 @@
 ### Phase 6: AI Models, Pairing Anywhere, And Reach
 
 * Support for Ollama and ComfyUI: small language models, embeddings, Whisper, and image generation.
-* Pairing across networks, with a password based exchange that keeps the code safe through a relay.
+* Pairing across networks, reusing the SPAKE2 exchange so the code stays safe through a relay.
 * A setting to use your own iroh relay.
 * Stronger support for Linux Clients with Linux Agents.
 
@@ -125,6 +125,7 @@
 * File watchers inside sessions, several Clients on one Agent account, and large Node and Python projects are untested.
 * `slingshot.toml` supports only `sync.exclude`. Other settings have no effect.
 * Pairing across networks is not supported. Both machines must share a network or tailnet to link.
+* The new pairing has only been tested on one Mac. A successful link between two machines with it has not been run yet.
 * The notifications for an Agent coming back online, and the resource warnings, have not been seen on real machines.
 
 ## Test Record
@@ -170,3 +171,13 @@
 2. A second `slingshot menubar` skipped the build and took under a second.
 3. After a change to the app's Swift source, `slingshot menubar` rebuilt the app on its own.
 4. `slingshot tools` with archbox off failed after about 34 seconds with `archbox is not reachable`.
+
+### Safe Pairing: September 25, 2026, Mac Only
+
+* A test Agent ran on the Mac, with a relay in front of it that recorded every byte on the pairing port.
+
+1. Three wrong codes were each refused, the Agent counted them, and the third burned the code. The right code was then refused as used.
+2. Pressing Enter in `slingshot start` printed a new code.
+3. The recorded traffic held neither the code nor any of the wrong guesses.
+4. An old style pairing request was refused with an instruction to update, even with the right code.
+5. The new Client linking to an Agent built from the previous version was told to update that Agent.

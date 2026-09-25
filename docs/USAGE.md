@@ -44,7 +44,8 @@
 2. Slingshot checks the machine, then prints a pairing code.
 3. Leave it running. While it runs, it keeps the machine awake.
 
-* The code works once and expires after 10 minutes. For a new one, stop with Ctrl C and run it again.
+* The code works once, expires after 10 minutes, and stops working after 3 wrong tries. Press Enter for a new one.
+* The code never crosses the network, so someone watching the network cannot use it.
 
 | Option | Effect |
 | --- | --- |
