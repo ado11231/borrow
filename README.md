@@ -2,8 +2,6 @@
 
 <p align="center">Use the CPU, RAM, and GPU of a powerful machine from your laptop, without leaving your own editor and terminal.</p>
 
-<p align="center"><img src="docs/media/demo.gif" alt="slingshot run building a project on another machine" width="800"></p>
-
 ## What It Does
 
 * Runs builds, tests, servers, containers, and coding agents on a powerful machine while you keep working on your laptop.
@@ -13,8 +11,6 @@
 * Keeps sessions running when your laptop sleeps or loses its network.
 * Connects on the same network, over a tailnet, or from anywhere through iroh, with no account and no open router port.
 * Shows live CPU, RAM, GPU, and VRAM in the macOS menu bar, and notifies you when runs finish.
-
-<p align="center"><img src="docs/media/menubar.png" alt="The Slingshot menu bar panel showing CPU, RAM, GPU, and workspace" width="360"></p>
 
 ## Two Machines
 
