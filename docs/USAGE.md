@@ -61,10 +61,42 @@
 
 2. Both machines must be on the same network or tailnet for this step. A tailnet is a private network made by a VPN such as Tailscale.
 3. Once linked, the Client reaches the Agent from any network.
+4. Slingshot then offers to set up your tools on the Agent. See the next section.
 
 | Option | Effect |
 | --- | --- |
 | `--name <name>` | Save the Agent under a name of your choice. |
+
+### Set Up Tools On The Agent
+
+* Work runs on the Agent, so the tools you use must be installed there too.
+* At the end of `slingshot link`, and any time you run this command, Slingshot compares both machines:
+
+  ```sh
+  slingshot tools
+  ```
+
+* It offers each tool the Client has and the Agent lacks, plus what the current project needs:
+
+| Tool | How It Is Installed On The Agent |
+| --- | --- |
+| Git | The package manager |
+| Docker | The package manager, then the service is started and you are added to the `docker` group |
+| Node and npm | The package manager |
+| Python | The package manager |
+| Rust | The official `rustup` installer |
+| Claude Code | The official installer |
+| Codex | `npm` |
+
+* Slingshot then:
+  1. Lists every command it will run on the Agent.
+  2. Asks once: `Install them on archbox now? [Y/n]`.
+  3. Runs them in your terminal, so you can type your password when `sudo` asks.
+  4. Checks the Agent again and says which tools were installed.
+  5. Starts the sign in for Claude Code and Codex. Your accounts are never copied from the Client.
+* For Codex, open the link it prints in a browser on the Client. Slingshot forwards port 1455 so the sign in can finish.
+* Without a terminal, such as in a script, it only prints the list.
+* Slingshot does not match versions. Files such as `.nvmrc` or `rust-toolchain.toml` in your project still decide exact versions.
 
 ## Run Work
 
@@ -120,7 +152,7 @@
   2. The bar at the bottom shows the Agent and the project, such as `▶ archbox · app`.
   3. To leave without stopping it, press Ctrl B, then D.
   4. To end it, type `exit`, or run `slingshot stop <id>` from the Client.
-* Tools you run in a session, such as Claude Code, Codex, or Docker, must be installed on the Agent.
+* Tools you run in a session, such as Claude Code, Codex, or Docker, must be installed on the Agent. `slingshot tools` installs them.
 
 | Option | Effect |
 | --- | --- |
@@ -189,19 +221,16 @@ slingshot env remove .env
 
 ### Install It
 
-1. From the Slingshot source folder, build and install the app:
-
-   ```sh
-   mac/menubar/build.sh
-   ```
-
-2. Open it:
+1. Run:
 
    ```sh
    slingshot menubar
    ```
 
+2. The first time, Slingshot builds the app and installs it in `~/Applications`. This takes about a minute and needs the Xcode command line tools.
 3. From then on, it starts when you log in. You can turn this off in the app.
+
+* After you update Slingshot, run `slingshot menubar` again. It rebuilds the app only when the app changed.
 
 ### What It Shows
 

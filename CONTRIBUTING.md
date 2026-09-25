@@ -40,7 +40,7 @@
 | `rsync` | Both | Copies project files. |
 | An ssh server | Agent | Carries all work and requests. |
 | `tmux` | Agent | Keeps sessions running. |
-| Xcode command line tools | Mac Client | Builds the menu bar app. Only for app changes. |
+| Xcode command line tools | Mac Client | Builds the menu bar app. |
 
 1. Download and build the code:
 
@@ -59,9 +59,10 @@
 3. On a Mac, build and open the menu bar app:
 
    ```sh
-   mac/menubar/build.sh
    slingshot menubar
    ```
+
+   * Run it again after changing the app. It rebuilds whenever the app's source changed.
 
 ## Building And Testing
 
@@ -133,7 +134,7 @@
 * Wrap existing tools. Slingshot uses `ssh`, `rsync`, `tmux`, `docker`, and `iroh`, and never writes its own versions.
 * Describe machines as Client and Agent, never as Mac and Linux. Only the menu bar app may be macOS specific.
 * Never write fixed paths such as `/Users/...` or `/home/...`. Use the `directories` crate.
-* Never assume a package manager. Detect what is missing, print the install command, and never install automatically.
+* Never assume a package manager. Detect what is missing and print the install command. Never install without asking: show exactly what will run, then ask once.
 
 ### Rust
 

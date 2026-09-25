@@ -130,7 +130,7 @@ flowchart TD
 | Traffic | How It Travels | Purpose |
 | --- | --- | --- |
 | **Pairing** | JSON messages over TCP port 7433 | Exchanges a one time code for access. |
-| **Control** | `ssh` starts `slingshot internal-control` | Short requests: health, jobs, sync plans, sessions, environment files. |
+| **Control** | `ssh` starts `slingshot internal-control` | Short requests: health, jobs, sync plans, sessions, environment files, installed tools. |
 | **Work** | `ssh` starts `slingshot internal-run`, or joins `tmux` | Runs your command with a real terminal. |
 | **Files** | `rsync`, connecting through `slingshot internal-rsh` | Copies changed source files either way. |
 
@@ -286,7 +286,9 @@ flowchart LR
 * Thresholds, notification rules, and wording all live in `crates/slingshot-cli/src/watch/`.
 * The line format has its own version, `watch::event::VERSION`. The app refuses versions it does not understand.
 * The Try again button writes `retry` to the helper, which reconnects at once.
-* `slingshot menubar` saves the location of the `slingshot` program for the app, because apps started at login cannot find it on their own.
+* The app's Swift source is built into the `slingshot` program. `slingshot menubar` writes it to Slingshot's data folder, builds it with Swift, signs it for this machine, and installs it in `~/Applications`.
+* The installed app holds a fingerprint of the source it was built from, so `slingshot menubar` rebuilds only when that source changed.
+* `slingshot menubar` also saves the location of the `slingshot` program for the app, because apps started at login cannot find it on their own.
 
 ## Security
 
@@ -349,18 +351,19 @@ slingshot/
 | --- | --- | --- | --- |
 | `lib.rs` | Lists the modules. | none | the other crates |
 | `protocol.rs` | Pairing messages, hardware details, and health values. | none | `config`, `control`, `telemetry`, Agent `lib`, several Client commands |
-| `control.rs` | Versioned control messages, job records, and message reading and writing. | `protocol`, `source` | Agent `service`, `jobs`, `projects`, `runner`; Client `client`, `transfer`, most commands |
+| `control.rs` | Versioned control messages, job records, and message reading and writing. | `protocol`, `source`, `tools` | Agent `service`, `jobs`, `projects`, `runner`; Client `client`, `transfer`, most commands |
 | `config.rs` | The Client's saved Agents: loading, saving, and choosing one. | `network`, `protocol` | `keys` and nearly every Client file |
 | `network.rs` | Tells local, tailnet, and other addresses apart. | none | `config`, Agent `lib`, Client `route` |
 | `tunnel.rs` | What both machines share for iroh: the connection name and a saved identity. | `storage` | Agent `lib`, `clients`, `tunnel`; Client `route`, `tunnel`, `link` |
 | `keys.rs` | Names the installed ssh key and reads this machine's ssh identity. | `config`, `storage` | Agent `lib`; Client `keys`, `link`, `unlink`, `transfer` |
 | `storage.rs` | Private folders, IDs, safe file writes, and file locks. | none | `source`, `sync`, `keys`, `tunnel`, and many files in both other crates |
-| `source.rs` | Decides which files are source, and fingerprints them. | `storage` | `control`, `sync`, Agent `projects`, Client `transfer`, `env` |
+| `source.rs` | Decides which files are source, and fingerprints them. | `storage` | `control`, `sync`, Agent `projects`, Client `transfer`, `env`, `menubar` |
 | `sync.rs` | Three way sync: planning, conflicts, staging, and safe apply with rollback. | `source`, `storage` | Agent `projects`, Client `transfer` |
-| `stack.rs` | Recognizes Rust, Node, and Python projects. | none | `artifacts` |
+| `stack.rs` | Recognizes Rust, Node, and Python projects. | none | `artifacts`, `tools` |
 | `artifacts.rs` | Where each kind of project keeps its build output on the Agent. | `stack` | Agent `projects`, Client `run` |
-| `telemetry.rs` | Reads hardware details and live use with `sysinfo` and `nvidia-smi`. | `presentation`, `protocol` | `preflight`, Agent `lib`, Client `health`, `transfer`, `watch` |
-| `preflight.rs` | Setup checks that print the command to fix a problem. | `presentation`, `telemetry` | Agent `lib`, `jobs`; Client `link`, `transfer` |
+| `telemetry.rs` | Reads hardware details and live use with `sysinfo` and `nvidia-smi`. | `presentation`, `protocol` | `preflight`, `tools`, Agent `lib`, Client `health`, `transfer`, `watch` |
+| `preflight.rs` | Setup checks that print the command to fix a problem, and the package manager's install command. | `presentation`, `telemetry` | `tools`, Agent `lib`, `jobs`, `service`; Client `link`, `transfer` |
+| `tools.rs` | The developer tools Slingshot can set up on the Agent, how to find them, and the commands that install them. | `preflight`, `stack`, `telemetry` | `control`, Agent `service`, Client `tools` |
 | `presentation.rs` | The shared output style: symbols, colors, rows, and sizes. | none | `step`, `preflight`, `telemetry`, every command |
 | `step.rs` | A spinner for slow work, then a finished line with the time taken. | `presentation` | Agent `lib`; Client `client`, `transfer`, `run`, `link`, `ps`, `unlink` |
 
@@ -371,7 +374,7 @@ slingshot/
 | File | Purpose | Uses | Used By |
 | --- | --- | --- | --- |
 | `lib.rs` | `slingshot start`: setup checks, pairing, and starting the other parts. | `awake`, `clients`, `service`, `tunnel` | Client `main` |
-| `service.rs` | The private control socket, and the `internal-control` helper that reaches it. | `clients`, `jobs`, `projects` | `lib`, `runner`, Client `main` |
+| `service.rs` | The private control socket, the `internal-control` helper that reaches it, and the tools probe run in the login shell. | `clients`, `jobs`, `projects` | `lib`, `runner`, Client `main` |
 | `projects.rs` | Project storage: source copies, sync locks, build output, and environment files. | `jobs` | `service`, `jobs`, `runner` |
 | `jobs.rs` | Job records, `tmux` sessions, and safe stopping. | `projects` | `service`, `projects`, `runner` |
 | `runner.rs` | `slingshot internal-run`: runs one command in the project copy with a real terminal. | `jobs`, `projects`, `service` | Client `main` |
@@ -407,7 +410,8 @@ slingshot/
 
 | File | Command | Uses |
 | --- | --- | --- |
-| `link.rs` | `slingshot link` | `client`, `keys`, `project`, `menubar` |
+| `link.rs` | `slingshot link` | `client`, `keys`, `project`, `menubar`, `tools` |
+| `tools.rs` | `slingshot tools`, and the tools step at the end of `link` | `client`, `project`, `route`, `ssh`, `run` |
 | `unlink.rs` | `slingshot unlink` | `client`, `project`, `ssh` |
 | `run.rs` | `slingshot run` | `client`, `project`, `route`, `ssh`, `transfer` |
 | `attach.rs` | `slingshot attach` | `client`, `project`, `route`, `ssh`, `transfer`, `run` |
@@ -417,7 +421,7 @@ slingshot/
 | `info.rs` | `slingshot info` | `client` |
 | `health.rs` | `slingshot health`, and the health thresholds `watch` shares | `client`, `live` |
 | `top.rs` | `slingshot top` | `client`, `live`, `ps`, `health` |
-| `menubar.rs` | `slingshot menubar` | none |
+| `menubar.rs` | `slingshot menubar`, which also builds and installs the app | `project` |
 
 ### Tests
 
@@ -431,7 +435,6 @@ slingshot/
 | File | Purpose |
 | --- | --- |
 | `Package.swift` | The Swift package definition. No outside dependencies. |
-| `build.sh` | Builds the app, signs it for this machine, and installs it in `~/Applications`. |
 | `Info.plist` | The app's identity. Hides the Dock icon. |
 | `Sources/App.swift` | The app's starting point and menu bar icon. |
 | `Sources/Watcher.swift` | Starts `internal-watch`, reads its lines, restarts it if it stops, and sends `retry`. |

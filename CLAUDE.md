@@ -70,7 +70,7 @@
 3. **Wrap existing tools. Never rebuild them.** Slingshot wraps `ssh`, `rsync`, `tmux`, `docker`, `ollama`, `nvidia-smi`, and the `iroh` library. Never write your own ssh, file transfer, terminal multiplexer, container engine, inference engine, relay server, or NAT traversal.
 4. **Keep setup simple.** One program per machine, one pairing step, one command to use. Reject designs that add setup steps.
 5. **Stay platform neutral.** Describe everything as Client and Agent, never as Mac and Linux. Mac to Linux and Linux to Linux must both work. Only the menu bar app may be macOS specific.
-6. **Design for a stranger.** Anything easy only on the author's machine becomes a setup check or an installer step. Every failed check prints the exact fix. Detect and instruct. Never install anything automatically.
+6. **Design for a stranger.** Anything easy only on the author's machine becomes a setup check or an installer step. Every failed check prints the exact fix. Detect and instruct. Never install without asking: show exactly what will run, then ask once.
 7. **Require nothing a stranger lacks.** A VPN such as Tailscale is used when present, never required. iroh connects from anywhere with no account, no server, and no open router port.
 
 ---
@@ -154,7 +154,7 @@
 
 ### Formats And Versions
 
-* **Control messages:** any change to a `Request` or `Response` shape in `slingshot-core/src/control.rs` raises `control::VERSION`, currently 6.
+* **Control messages:** any change to a `Request` or `Response` shape in `slingshot-core/src/control.rs` raises `control::VERSION`, currently 7.
 * **Menu bar lines:** if a field in `slingshot-cli/src/watch/event.rs` changes meaning or is removed, raise `watch::event::VERSION` and change `mac/menubar/Sources/Model.swift` in the same commit.
 * **Pairing messages:** changes to `slingshot-core/src/protocol.rs` force every user to link again. Say so explicitly.
 
@@ -307,7 +307,7 @@
 ## 15. Current State
 
 * **Phases 1 and 3 are complete.** Phase 4, reaching the Agent from any network, is in final testing. Phase 5 is in progress: the menu bar app and notifications are built, and automatic port forwarding is not.
-* **206 tests pass**, and formatting and Clippy pass.
+* **224 tests pass**, and formatting and Clippy pass.
 * **The rename from borrow has no migration.** Both machines must run `slingshot link` again after updating.
 * Everything under [known limitations](docs/ROADMAP.md#known-limitations) does not work yet. Never describe it as working.
 * The full [test record](docs/ROADMAP.md#test-record) is in the roadmap.

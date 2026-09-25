@@ -7,14 +7,15 @@
 
 1. [Starting The Agent](#starting-the-agent)
 2. [Linking](#linking)
-3. [Reaching The Agent](#reaching-the-agent)
-4. [Running Commands](#running-commands)
-5. [Syncing Files](#syncing-files)
-6. [Jobs](#jobs)
-7. [GPU](#gpu)
-8. [The Menu Bar App](#the-menu-bar-app)
-9. [Removing Slingshot](#removing-slingshot)
-10. [Getting Help](#getting-help)
+3. [Setting Up Tools](#setting-up-tools)
+4. [Reaching The Agent](#reaching-the-agent)
+5. [Running Commands](#running-commands)
+6. [Syncing Files](#syncing-files)
+7. [Jobs](#jobs)
+8. [GPU](#gpu)
+9. [The Menu Bar App](#the-menu-bar-app)
+10. [Removing Slingshot](#removing-slingshot)
+11. [Getting Help](#getting-help)
 
 ## Starting The Agent
 
@@ -88,6 +89,43 @@
 * **Message:** `That does not look like a pairing code`
 * **Meaning:** A code has three parts separated by colons, such as `192.168.1.9:7433:K7QW9ZR2`.
 * **Fix:** Copy the whole code from the Agent's screen.
+
+## Setting Up Tools
+
+### Tools Step Failed After Linking
+
+* **Message:** `Could not set up tools on archbox`
+* **Meaning:** Linking worked. Only the tools step at the end failed, and the reason follows the message.
+* **Fix:** Fix the reason shown, then run `slingshot tools`.
+
+### No Install Command
+
+* **Message:** `No install command for brew. Install it on the Agent yourself`, or `No package manager found`
+* **Meaning:** Slingshot only runs install commands it trusts on that kind of Agent.
+* **Fix:** Install the tool on the Agent with its own instructions, for example inside `slingshot attach`.
+
+### Tool Still Missing
+
+* **Message:** `Docker is still missing. Check the output above, then run slingshot tools again`
+* **Meaning:** An install command failed, or the tool was installed in a folder the Agent's login shell does not search.
+* **Fix:**
+  1. Read the error printed during the install, and fix it.
+  2. If the installer said a folder such as `~/.local/bin` is not on your PATH, add it in the Agent's shell startup file.
+  3. Run `slingshot tools` again.
+
+### Sign In Did Not Finish
+
+* **Message:** `Sign in to Codex did not finish`
+* **Meaning:** The sign in was cancelled or failed. The tool is still installed.
+* **Fix:**
+  1. Run the command shown in the message inside `slingshot attach`.
+  2. For Codex, nothing else on the Client may use port 1455 during the sign in.
+
+### Docker Permission Denied
+
+* **Message:** `permission denied while trying to connect to the Docker daemon socket`
+* **Meaning:** You were added to the `docker` group, but open sessions started before that.
+* **Fix:** End open sessions with `exit`, then run `slingshot attach` again.
 
 ## Reaching The Agent
 
@@ -166,7 +204,7 @@
 
 * **Message:** `command not found`, for a tool that works on the Client
 * **Meaning:** A session runs on the Agent, so it can only use tools installed there.
-* **Fix:** Install the tool on the Agent, then sign in to it there if it needs an account.
+* **Fix:** Run `slingshot tools` to install it on the Agent and sign in.
 
 ### Session Lost Its Connection
 
@@ -263,11 +301,23 @@
 
 ## The Menu Bar App
 
-### App Not Installed
+### Swift Not Found
 
-* **Message:** `Slingshot.app is not installed`
-* **Meaning:** `slingshot menubar` could not find the app.
-* **Fix:** From the Slingshot source folder, run `mac/menubar/build.sh`, then `slingshot menubar`.
+* **Message:** `Swift is needed to build the menu bar app`
+* **Meaning:** `slingshot menubar` builds the app with Swift, which comes with the Xcode command line tools.
+* **Fix:** Run `xcode-select --install`, then `slingshot menubar` again.
+
+### App Build Failed
+
+* **Message:** `Could not build the menu bar app. Swift said:`, followed by Swift's last lines
+* **Meaning:** Swift could not build the app. The app needs macOS 14 or later.
+* **Fix:** Install updates for the Xcode command line tools in System Settings, then General, then Software Update. Run `slingshot menubar` again. If it still fails, open an issue with the full message.
+
+### App Too Old
+
+* **Message:** The panel says `Update the app with: slingshot menubar`
+* **Meaning:** The app is older than the `slingshot` program it runs.
+* **Fix:** Run `slingshot menubar`. It rebuilds the app.
 
 ### App Cannot Find Slingshot
 
