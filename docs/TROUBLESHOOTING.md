@@ -24,8 +24,9 @@
 * **Message:** `SSH server not running`
 * **Meaning:** Slingshot sends all work over ssh, so the Agent needs an ssh server. The Client does not.
 * **Fix:**
-  1. On macOS, turn on System Settings, then General, then Sharing, then Remote Login.
-  2. On Linux, run `sudo systemctl enable --now sshd`.
+
+1. On macOS, turn on System Settings, then General, then Sharing, then Remote Login.
+2. On Linux, run `sudo systemctl enable --now sshd`.
 
 ### Missing Tool
 
@@ -69,8 +70,9 @@
 * **Message:** `Could not reach 192.168.1.9:7433`
 * **Meaning:** The Client could not contact the Agent.
 * **Fix:**
-  1. Check that `slingshot start` is running on the Agent.
-  2. Check that both machines are on the same network or tailnet. Linking across networks is not supported yet.
+
+1. Check that `slingshot start` is running on the Agent.
+2. Check that both machines are on the same network or tailnet. Linking across networks is not supported yet.
 
 ### Code Expired Or Used
 
@@ -109,17 +111,19 @@
 * **Message:** `Docker is still missing. Check the output above, then run slingshot tools again`
 * **Meaning:** An install command failed, or the tool was installed in a folder the Agent's login shell does not search.
 * **Fix:**
-  1. Read the error printed during the install, and fix it.
-  2. If the installer said a folder such as `~/.local/bin` is not on your PATH, add it in the Agent's shell startup file.
-  3. Run `slingshot tools` again.
+
+1. Read the error printed during the install, and fix it.
+2. If the installer said a folder such as `~/.local/bin` is not on your PATH, add it in the Agent's shell startup file.
+3. Run `slingshot tools` again.
 
 ### Sign In Did Not Finish
 
 * **Message:** `Sign in to Codex did not finish`
 * **Meaning:** The sign in was cancelled or failed. The tool is still installed.
 * **Fix:**
-  1. Run the command shown in the message inside `slingshot attach`.
-  2. For Codex, nothing else on the Client may use port 1455 during the sign in.
+
+1. Run the command shown in the message inside `slingshot attach`.
+2. For Codex, nothing else on the Client may use port 1455 during the sign in.
 
 ### Docker Permission Denied
 
@@ -237,9 +241,10 @@
 * **Message:** `These paths changed differently on this machine and archbox`
 * **Meaning:** The same files changed on both machines in different ways. Nothing was copied.
 * **Fix:**
-  1. Compare both sides with `slingshot sync --check` and `slingshot sync --pull --check`.
-  2. Make each listed file match on both machines, or undo one edit.
-  3. Run the sync again.
+
+1. Compare both sides with `slingshot sync --check` and `slingshot sync --pull --check`.
+2. Make each listed file match on both machines, or undo one edit.
+3. Run the sync again.
 
 ### Interrupted Sync
 
@@ -351,8 +356,10 @@
 ## Getting Help
 
 * Open an issue on GitHub with:
-  1. The command you ran.
-  2. What you expected.
-  3. The full output.
-  4. The operating system of each machine.
+
+1. The command you ran.
+2. What you expected.
+3. The full output.
+4. The operating system of each machine.
+
 * [CONTRIBUTING.md](../CONTRIBUTING.md#reporting-a-problem) has the full list.

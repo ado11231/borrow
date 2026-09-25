@@ -25,9 +25,10 @@
 * Slingshot lets a light machine use the CPU, RAM, and GPU of a powerful one.
 * You work in your own editor and terminal. Slingshot copies your project to the powerful machine, runs your commands there, and streams the results back.
 * Three principles shape the design:
-  1. **The machine you work on stays light.** It edits files and shows output, and never does the heavy work.
-  2. **Slingshot wraps proven tools.** It uses `ssh` for connections, `rsync` for copying, `tmux` for lasting terminals, and the `iroh` library for connections across the internet.
-  3. **Slingshot always says where work runs.** Every remote command begins with a line such as `▶ Running on archbox via tailnet`.
+
+1. **The machine you work on stays light.** It edits files and shows output, and never does the heavy work.
+2. **Slingshot wraps proven tools.** It uses `ssh` for connections, `rsync` for copying, `tmux` for lasting terminals, and the `iroh` library for connections across the internet.
+3. **Slingshot always says where work runs.** Every remote command begins with a line such as `▶ Running on archbox via tailnet`.
 
 ## Key Terms
 
@@ -116,9 +117,11 @@ flowchart TD
 | `slingshot-cli` | The program | Every command, `ssh` and `rsync` calls, choosing a connection path, and the menu bar helper. |
 
 * **Dependencies flow one way.**
-  1. `slingshot-cli` uses both libraries.
-  2. `slingshot-agent` uses `slingshot-core`.
-  3. `slingshot-core` uses neither.
+
+1. `slingshot-cli` uses both libraries.
+2. `slingshot-agent` uses `slingshot-core`.
+3. `slingshot-core` uses neither.
+
 * A rule both machines need always lives in `slingshot-core`.
 * The Rust compiler rejects circular dependencies, so this structure cannot erode by accident.
 
@@ -151,9 +154,11 @@ flowchart TD
 
 * The daemon tracks everything with state: pairing, jobs, health, sync locks, and sessions.
 * The Client asks it questions in three steps:
-  1. The Client runs `ssh <agent> slingshot internal-control`.
-  2. The helper opens a private socket on the Agent, a connection point only the Agent's user account can use.
-  3. Requests and replies travel as JSON messages, each with a version number, a size limit, and a time limit.
+
+1. The Client runs `ssh <agent> slingshot internal-control`.
+2. The helper opens a private socket on the Agent, a connection point only the Agent's user account can use.
+3. Requests and replies travel as JSON messages, each with a version number, a size limit, and a time limit.
+
 * `ssh` has already checked the caller, so the Agent's user account is the security boundary.
 * Message types live in `slingshot-core/src/control.rs`. Changing their shape must raise `control::VERSION`, so mismatched versions refuse to talk instead of misreading each other.
 
@@ -214,9 +219,11 @@ sequenceDiagram
 
 * `slingshot-core/src/source.rs` decides which files count as source.
 * It follows your `.gitignore`, and always leaves out:
-  1. Version control folders, such as `.git`.
-  2. Build output, such as `target` and `node_modules`.
-  3. Environment files, such as `.env`, which often hold secrets.
+
+1. Version control folders, such as `.git`.
+2. Build output, such as `target` and `node_modules`.
+3. Environment files, such as `.env`, which often hold secrets.
+
 * Left out files are never copied, pulled, previewed, or backed up.
 
 ### How A Sync Works
@@ -249,18 +256,24 @@ sequenceDiagram
 ## Runs And Sessions
 
 * A **run** comes from `slingshot run`.
-  1. It lasts only as long as its connection.
-  2. If the connection drops, the Agent stops it and records it as interrupted.
+
+1. It lasts only as long as its connection.
+2. If the connection drops, the Agent stops it and records it as interrupted.
+
 * A **session** comes from `slingshot attach`.
-  1. It is a `tmux` session that keeps running after you disconnect.
-  2. Inside a project, it works in the project copy, reached through a link at `~/Slingshot/<project>` so the prompt stays readable.
-  3. Outside a project, it works in the Agent's home folder and copies nothing.
-  4. Each project has one session, and the home folder has one.
+
+1. It is a `tmux` session that keeps running after you disconnect.
+2. Inside a project, it works in the project copy, reached through a link at `~/Slingshot/<project>` so the prompt stays readable.
+3. Outside a project, it works in the Agent's home folder and copies nothing.
+4. Each project has one session, and the home folder has one.
+
 * An open session does not block syncing or runs. It is a place to work, like a terminal on the Client. A run does block other syncs and runs, because it owns the project copy while it works.
 * Sessions use Slingshot's own `tmux` server and settings, so a personal `tmux` setup is never touched:
-  1. The account's login shell, read from the user database, so startup files and tools load.
-  2. A full color terminal type and a `UTF-8` locale.
-  3. Mouse scrolling, a short Escape delay, and a quiet bar showing the Agent and the project.
+
+1. The account's login shell, read from the user database, so startup files and tools load.
+2. A full color terminal type and a `UTF-8` locale.
+3. Mouse scrolling, a short Escape delay, and a quiet bar showing the Agent and the project.
+
 * The Agent keeps a record of every job.
 * `slingshot stop <id>` asks a job to finish, then forces it after five seconds.
 * Before stopping a process, the Agent checks its ID and its start time, so it never stops an unrelated program that reused an old ID.
@@ -281,8 +294,10 @@ flowchart LR
 ```
 
 * `slingshot internal-watch` asks the Agent for health and jobs, and prints one JSON object per line:
-  1. A **status** line carries each value and a level: good, warning, or high.
-  2. A **notice** line is a notification that is due, already written in plain words.
+
+1. A **status** line carries each value and a level: good, warning, or high.
+2. A **notice** line is a notification that is due, already written in plain words.
+
 * Thresholds, notification rules, and wording all live in `crates/slingshot-cli/src/watch/`.
 * The line format has its own version, `watch::event::VERSION`. The app refuses versions it does not understand.
 * The Try again button writes `retry` to the helper, which reconnects at once.

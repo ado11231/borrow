@@ -68,30 +68,36 @@
 ### Phase 4: Reaching The Agent From Any Network
 
 * **Built:**
-  1. The Client tries the local network, then the tailnet, then iroh, and uses the first that answers. Every run names its path.
-  2. iroh connects directly when it can, and through a relay when it cannot. A relay only sees encrypted data.
-  3. The Agent accepts iroh connections only from paired Clients.
-  4. `slingshot start` keeps the Agent awake.
-  5. Error messages tell an Agent that is off apart from a Client that is no longer paired.
+
+1. The Client tries the local network, then the tailnet, then iroh, and uses the first that answers. Every run names its path.
+2. iroh connects directly when it can, and through a relay when it cannot. A relay only sees encrypted data.
+3. The Agent accepts iroh connections only from paired Clients.
+4. `slingshot start` keeps the Agent awake.
+5. Error messages tell an Agent that is off apart from a Client that is no longer paired.
+
 * **Remaining:**
-  1. Test a lost connection during a build over iroh.
-  2. Test an Agent restart over iroh.
+
+1. Test a lost connection during a build over iroh.
+2. Test an Agent restart over iroh.
 
 ### Phase 5: Polish
 
 * **Built:**
-  1. A macOS menu bar app showing CPU, RAM, GPU, VRAM, and workspace space.
-  2. An offline screen with the cause, the fix, and a Try again button.
-  3. Notifications for finished, failed, and interrupted runs, the Agent going offline or returning, and low memory, low disk, or a hot GPU.
-  4. `slingshot attach` from anywhere: a project session, or a home session outside a project.
-  5. Every `attach` syncs first. `sync`, `sync --pull`, and `run` work while a session is open.
-  6. Sessions start in the login shell with full color, `UTF-8`, mouse scrolling, a quiet bar, and a readable `~/Slingshot/<project>` path.
-  7. `slingshot menubar` builds, signs, and installs the app itself, and rebuilds it only when its source changed.
-  8. `link` ends by offering to install the Client's tools on the Agent, then starts the sign in for Claude Code and Codex. `slingshot tools` repeats it later. Not yet run on real machines.
+
+1. A macOS menu bar app showing CPU, RAM, GPU, VRAM, and workspace space.
+2. An offline screen with the cause, the fix, and a Try again button.
+3. Notifications for finished, failed, and interrupted runs, the Agent going offline or returning, and low memory, low disk, or a hot GPU.
+4. `slingshot attach` from anywhere: a project session, or a home session outside a project.
+5. Every `attach` syncs first. `sync`, `sync --pull`, and `run` work while a session is open.
+6. Sessions start in the login shell with full color, `UTF-8`, mouse scrolling, a quiet bar, and a readable `~/Slingshot/<project>` path.
+7. `slingshot menubar` builds, signs, and installs the app itself, and rebuilds it only when its source changed.
+8. `link` ends by offering to install the Client's tools on the Agent, then starts the sign in for Claude Code and Codex. `slingshot tools` repeats it later. Not yet run on real machines.
+
 * **Remaining:**
-  1. Automatic port forwarding, so the Agent's port 3000 appears at `localhost:3000` on the Client.
-  2. Notifications when a server is ready and when a job waits for input.
-  3. Test the tools step on real machines.
+
+1. Automatic port forwarding, so the Agent's port 3000 appears at `localhost:3000` on the Client.
+2. Notifications when a server is ready and when a job waits for input.
+3. Test the tools step on real machines.
 
 ## Planned
 

@@ -161,15 +161,16 @@
 ### Security
 
 * Never weaken these protections:
-  1. Pairing codes work once and expire.
-  2. The daemon listens only on the machine itself and the local network, never on `0.0.0.0`.
-  3. Installed keys are named so `unlink` can remove them.
-  4. Arguments sent to the Agent are quoted one by one with `shell-words`, never joined into one shell command.
-  5. Control messages carry a version, a size limit, and a time limit.
-  6. The Agent's user account is the security boundary.
-  7. Processes are never stopped by ID alone. Their start time is checked too.
-  8. The Agent accepts iroh connections only from paired Clients, and passes them only to its own ssh server.
-  9. Secrets and environment file contents never appear in arguments, logs, or output.
+
+1. Pairing codes work once and expire.
+2. The daemon listens only on the machine itself and the local network, never on `0.0.0.0`.
+3. Installed keys are named so `unlink` can remove them.
+4. Arguments sent to the Agent are quoted one by one with `shell-words`, never joined into one shell command.
+5. Control messages carry a version, a size limit, and a time limit.
+6. The Agent's user account is the security boundary.
+7. Processes are never stopped by ID alone. Their start time is checked too.
+8. The Agent accepts iroh connections only from paired Clients, and passes them only to its own ssh server.
+9. Secrets and environment file contents never appear in arguments, logs, or output.
 
 ### The Menu Bar App
 
@@ -186,11 +187,12 @@
 ### Risky Actions
 
 * Never do these without explicit permission in the current conversation:
-  1. Delete files you did not create, or run `rm -rf`.
-  2. Run `git reset --hard`, rewrite history, or force push.
-  3. Change or delete keys, configuration, or user data on either machine.
-  4. Edit anything outside this repository, such as `~/.ssh/config`.
-  5. Install software or change system settings.
+
+1. Delete files you did not create, or run `rm -rf`.
+2. Run `git reset --hard`, rewrite history, or force push.
+3. Change or delete keys, configuration, or user data on either machine.
+4. Edit anything outside this repository, such as `~/.ssh/config`.
+5. Install software or change system settings.
 
 ---
 
@@ -240,13 +242,14 @@
 | Change what works | [ROADMAP.md](docs/ROADMAP.md), with the date, recording only what was tested |
 
 * **How to write:**
-  1. Use plain words and short sentences. Explain a technical term the first time it appears.
-  2. Use bullets, numbered steps, and tables. No paragraphs.
-  3. Capitalize every word in titles.
-  4. Never use em dashes, or hyphens in ordinary text. Write "long lived", not the joined form. Hyphens are fine in code.
-  5. Never use empty words such as "robust", "seamless", "leverage", "comprehensive", or "simply".
-  6. Remove anything that does not help the reader.
-  7. Never describe planned work as finished.
+
+1. Use plain words and short sentences. Explain a technical term the first time it appears.
+2. Use bullets, numbered steps, and tables. No paragraphs.
+3. Capitalize every word in titles.
+4. Never use em dashes, or hyphens in ordinary text. Write "long lived", not the joined form. Hyphens are fine in code.
+5. Never use empty words such as "robust", "seamless", "leverage", "comprehensive", or "simply".
+6. Remove anything that does not help the reader.
+7. Never describe planned work as finished.
 
 ---
 
@@ -264,23 +267,26 @@
 ## 12. When To Stop And Ask
 
 * Stop and ask before continuing when:
-  1. The request conflicts with any rule in this file.
-  2. You need a new dependency.
-  3. You would change a message format or a stored file format.
-  4. You would delete or move user data, keys, or configuration.
-  5. You would change anything covered by the security rules.
-  6. The change passes the size limits in section 7.
-  7. You are unsure what the user wants.
+
+1. The request conflicts with any rule in this file.
+2. You need a new dependency.
+3. You would change a message format or a stored file format.
+4. You would delete or move user data, keys, or configuration.
+5. You would change anything covered by the security rules.
+6. The change passes the size limits in section 7.
+7. You are unsure what the user wants.
 
 ---
 
 ## 13. Reporting Your Work
 
 * Report in this order, briefly and factually:
-  1. **What changed**, file by file.
-  2. **What you verified**, with the commands you ran and their results.
-  3. **What you did not verify**, and why.
-  4. **What the user must do**, such as linking again after a format change.
+
+1. **What changed**, file by file.
+2. **What you verified**, with the commands you ran and their results.
+3. **What you did not verify**, and why.
+4. **What the user must do**, such as linking again after a format change.
+
 * Never describe work as done if part of it is not. Never hide a failure inside a longer summary.
 
 ---

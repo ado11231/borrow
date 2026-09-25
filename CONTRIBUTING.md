@@ -83,20 +83,25 @@
 * CI runs the same checks, and the menu bar build, on Linux and macOS for every pull request.
 
 * **Where tests live:**
-  1. Unit tests sit at the bottom of the file they test, in a `tests` module.
-  2. Tests that run the finished program live in `crates/slingshot-cli/tests/`.
+
+1. Unit tests sit at the bottom of the file they test, in a `tests` module.
+2. Tests that run the finished program live in `crates/slingshot-cli/tests/`.
+
 * **What needs a test:**
-  1. Every rule or decision, such as which files are source, how a sync decides what to copy, when a notification is sent, or how an error is explained.
-  2. Code that only starts another program, such as `ssh`, is tested on real machines instead.
+
+1. Every rule or decision, such as which files are source, how a sync decides what to copy, when a notification is sent, or how an error is explained.
+2. Code that only starts another program, such as `ssh`, is tested on real machines instead.
 
 ## Testing On Two Machines
 
 * Automated tests cannot prove Slingshot works. Many problems only appear with a real network and a real second machine.
 * If your change affects running commands, syncing, sessions, or connections, test it on two machines:
-  1. Start the Agent with `slingshot start`.
-  2. Link the Client with `slingshot link <code>`.
-  3. Use the feature you changed, such as `slingshot run cargo build`, `slingshot sync`, or `slingshot attach`.
-  4. Test failures: stop `slingshot start`, drop the network, or restart the Agent.
+
+1. Start the Agent with `slingshot start`.
+2. Link the Client with `slingshot link <code>`.
+3. Use the feature you changed, such as `slingshot run cargo build`, `slingshot sync`, or `slingshot attach`.
+4. Test failures: stop `slingshot start`, drop the network, or restart the Agent.
+
 * In your pull request, list exactly what you ran and what happened. Never describe something as working unless you ran it.
 
 ## Making A Change
@@ -212,9 +217,11 @@
 ### Pull Requests
 
 * Each pull request describes:
-  1. What changed, and why.
-  2. How you tested it, with the exact commands, and whether you used two machines.
-  3. Anything not yet tested.
+
+1. What changed, and why.
+2. How you tested it, with the exact commands, and whether you used two machines.
+3. Anything not yet tested.
+
 * It is ready for review when all checks pass and the documentation is updated.
 
 ## Out Of Scope

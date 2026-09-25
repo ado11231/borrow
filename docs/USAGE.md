@@ -89,11 +89,13 @@
 | Codex | `npm` |
 
 * Slingshot then:
-  1. Lists every command it will run on the Agent.
-  2. Asks once: `Install them on archbox now? [Y/n]`.
-  3. Runs them in your terminal, so you can type your password when `sudo` asks.
-  4. Checks the Agent again and says which tools were installed.
-  5. Starts the sign in for Claude Code and Codex. Your accounts are never copied from the Client.
+
+1. Lists every command it will run on the Agent.
+2. Asks once: `Install them on archbox now? [Y/n]`.
+3. Runs them in your terminal, so you can type your password when `sudo` asks.
+4. Checks the Agent again and says which tools were installed.
+5. Starts the sign in for Claude Code and Codex. Your accounts are never copied from the Client.
+
 * For Codex, open the link it prints in a browser on the Client. Slingshot forwards port 1455 so the sign in can finish.
 * Without a terminal, such as in a script, it only prints the list.
 * Slingshot does not match versions. Files such as `.nvmrc` or `rust-toolchain.toml` in your project still decide exact versions.
@@ -109,9 +111,11 @@
   ```
 
 * Slingshot then:
-  1. Copies the files you changed to the Agent.
-  2. Warns you if the Agent is low on memory or disk space.
-  3. Runs the command in the same folder of the Agent's copy, and streams the output back.
+
+1. Copies the files you changed to the Agent.
+2. Warns you if the Agent is low on memory or disk space.
+3. Runs the command in the same folder of the Agent's copy, and streams the output back.
+
 * A line shows where it runs: the Agent, the connection path, the project, and where build output goes.
 
   ```
@@ -148,10 +152,12 @@
 * The session keeps running when you disconnect or lose your network. Run `slingshot attach` again to return to it.
 * Each project has one session, and the home folder has one session.
 * Inside a session:
-  1. Scroll back through output with your trackpad or mouse.
-  2. The bar at the bottom shows the Agent and the project, such as `▶ archbox · app`.
-  3. To leave without stopping it, press Ctrl B, then D.
-  4. To end it, type `exit`, or run `slingshot stop <id>` from the Client.
+
+1. Scroll back through output with your trackpad or mouse.
+2. The bar at the bottom shows the Agent and the project, such as `▶ archbox · app`.
+3. To leave without stopping it, press Ctrl B, then D.
+4. To end it, type `exit`, or run `slingshot stop <id>` from the Client.
+
 * Tools you run in a session, such as Claude Code, Codex, or Docker, must be installed on the Agent. `slingshot tools` installs them.
 
 | Option | Effect |
@@ -172,8 +178,9 @@
 * Syncing works while a session is open, so you can pull a coding agent's edits back without stopping it.
 * **Edits made on only one machine are kept.** A normal sync leaves an edit made only on the Agent alone, and tells you so you can pull it.
 * **A conflict stops the sync.** If a file changed differently on both machines, nothing is copied. To fix it:
-  1. Make each listed file match on both machines, or undo one of the edits.
-  2. Run the sync again.
+
+1. Make each listed file match on both machines, or undo one of the edits.
+2. Run the sync again.
 
 ## Environment Files
 
@@ -244,18 +251,21 @@ slingshot env remove .env
 | Workspace | Free space for projects and build output. |
 
 * When the Agent cannot be reached, the panel shows:
-  1. Why, in plain words.
-  2. The command that fixes it.
-  3. A Try again button.
-  4. The last known values, greyed out.
+
+1. Why, in plain words.
+2. The command that fixes it.
+3. A Try again button.
+4. The last known values, greyed out.
 
 ### Notifications
 
 * The app notifies you when:
-  1. A run of 10 seconds or more finishes or fails.
-  2. A run or session is interrupted.
-  3. The Agent goes offline, and when it comes back.
-  4. The Agent is low on memory or disk space, or its GPU is running hot.
+
+1. A run of 10 seconds or more finishes or fails.
+2. A run or session is interrupted.
+3. The Agent goes offline, and when it comes back.
+4. The Agent is low on memory or disk space, or its GPU is running hot.
+
 * Each warning is sent once, and again only after the problem clears.
 * If none appear, turn them on in System Settings, then Notifications, then Slingshot.
 
@@ -292,11 +302,13 @@ slingshot env remove .env
 ## What Slingshot Copies
 
 * Slingshot copies your source files only. It never copies:
-  1. Anything your `.gitignore` excludes.
-  2. Version control folders such as `.git`.
-  3. Build output, such as `target`, `node_modules`, `.venv`, and caches.
-  4. Environment files: `.env`, `.env.*`, `*.env`, and `.envrc`.
-  5. Anything under `sync.exclude` in `slingshot.toml`.
+
+1. Anything your `.gitignore` excludes.
+2. Version control folders such as `.git`.
+3. Build output, such as `target`, `node_modules`, `.venv`, and caches.
+4. Environment files: `.env`, `.env.*`, `*.env`, and `.envrc`.
+5. Anything under `sync.exclude` in `slingshot.toml`.
+
 * Build output stays in separate storage on the Agent:
 
 | Project | Where Build Output Goes |
