@@ -5,6 +5,7 @@ use crate::preflight::install_command;
 use crate::stack::Stack;
 use crate::telemetry::is_installed;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -159,12 +160,44 @@ pub fn installed_here() -> Vec<Tool> {
         .collect()
 }
 
+/// Folders in the home folder where installers put programs for one user, such as Claude
+/// Code in `~/.local/bin`. Login shells that are not interactive often leave them off PATH,
+/// so Slingshot adds them to everything it starts on the Agent instead of editing any file.
+pub const USER_FOLDERS: [&str; 2] = [".local/bin", ".cargo/bin"];
+
+/// A shell line that puts `USER_FOLDERS` at the front of PATH.
+pub fn user_path_line() -> String {
+    let folders: Vec<String> = USER_FOLDERS
+        .iter()
+        .map(|folder| format!("$HOME/{folder}"))
+        .collect();
+    format!("export PATH=\"{}:$PATH\"", folders.join(":"))
+}
+
+/// `path` with each folder of `USER_FOLDERS` under `home` added in front, unless it is
+/// already there, for programs started without a shell.
+pub fn with_user_folders(path: &str, home: &Path) -> String {
+    let current: Vec<&str> = path.split(':').filter(|part| !part.is_empty()).collect();
+    let added: Vec<String> = USER_FOLDERS
+        .iter()
+        .map(|folder| home.join(folder).display().to_string())
+        .filter(|folder| !current.contains(&folder.as_str()))
+        .collect();
+    added
+        .iter()
+        .map(String::as_str)
+        .chain(current)
+        .collect::<Vec<&str>>()
+        .join(":")
+}
+
 /// A script that prints the program name of each tool it finds. The Agent runs it in a
-/// login shell, so it sees the same PATH as a session does.
+/// login shell with the per user folders added, so it sees what a session and a run do.
 pub fn probe_script() -> String {
     let programs: Vec<&str> = ALL.iter().map(|tool| tool.program()).collect();
     format!(
-        "for program in {}; do if command -v \"$program\" >/dev/null 2>&1; then echo \"$program\"; fi; done",
+        "{}; for program in {}; do if command -v \"$program\" >/dev/null 2>&1; then echo \"$program\"; fi; done",
+        user_path_line(),
         programs.join(" ")
     )
 }
@@ -272,6 +305,31 @@ mod tests {
         assert!(script.contains("echo 'Installing Git'\nbrew install git"));
         assert!(!script.contains("Docker"));
         assert!(script.contains("Installing Rust"));
+    }
+
+    #[test]
+    fn user_folders_go_in_front_once() {
+        let home = Path::new("/home/me");
+
+        assert_eq!(
+            with_user_folders("/usr/local/bin:/usr/bin", home),
+            "/home/me/.local/bin:/home/me/.cargo/bin:/usr/local/bin:/usr/bin"
+        );
+        assert_eq!(
+            with_user_folders("/home/me/.cargo/bin:/usr/bin", home),
+            "/home/me/.local/bin:/home/me/.cargo/bin:/usr/bin"
+        );
+        assert_eq!(
+            with_user_folders("", home),
+            "/home/me/.local/bin:/home/me/.cargo/bin"
+        );
+    }
+
+    #[test]
+    fn the_probe_looks_in_the_user_folders_first() {
+        assert!(
+            probe_script().starts_with("export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\";")
+        );
     }
 
     #[test]

@@ -119,7 +119,11 @@ async fn sign_in(target: &Agent, shell: &str, tool: Tool) -> anyhow::Result<()> 
             Style::stderr().dim("Open the link it prints in a browser on this machine")
         );
     }
-    let mut remote = login_shell(target, shell, command.clone());
+    let mut remote = login_shell(
+        target,
+        shell,
+        format!("{}; {command}", tools::user_path_line()),
+    );
     remote.forward = sign_in.forward;
     let lost = format!(
         "Lost connection to {} while signing in. Try again in slingshot attach with: {command}",

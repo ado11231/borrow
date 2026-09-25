@@ -8,6 +8,7 @@ use crate::{jobs, projects, service};
 use anyhow::{Context, bail};
 use slingshot_core::control::{JobKind, JobState};
 use slingshot_core::storage;
+use slingshot_core::tools;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::signal::unix::{SignalKind, signal};
@@ -67,6 +68,10 @@ pub async fn run(
     let terminal = unsafe { libc::isatty(0) } == 1;
     let mut child = tokio::process::Command::new(program);
     child.args(args).current_dir(&directory).envs(env);
+    if let Some(dirs) = directories::BaseDirs::new() {
+        let path = std::env::var("PATH").unwrap_or_default();
+        child.env("PATH", tools::with_user_folders(&path, dirs.home_dir()));
+    }
     unsafe {
         child.pre_exec(move || {
             if libc::setpgid(0, 0) != 0 {
