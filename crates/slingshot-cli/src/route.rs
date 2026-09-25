@@ -148,6 +148,7 @@ mod tests {
             program: None,
             addresses: addresses.iter().map(|a| a.to_string()).collect(),
             iroh: key.map(str::to_string),
+            client: None,
             specs: None,
         }
     }

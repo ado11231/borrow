@@ -19,7 +19,9 @@ use slingshot_core::tunnel;
 /// an entry nothing could ever remove.
 pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
     let (host, port, token) = parse_code(&code)?;
-    let client_name = core_keys::client_name();
+    let identity = tunnel::identity(&project::client_root()?)?;
+    let mut config = Config::load_or_empty()?;
+    let client_name = config.client_for(&host, &identity.public().to_string());
 
     let problems: Vec<Check> = [preflight::tool_check("rsync", Some("copying projects"))]
         .into_iter()
@@ -36,7 +38,6 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
     reaching.set(format!("Pairing with {host}"));
 
     let (private_key, public_key) = keys::ensure(&client_name)?;
-    let identity = tunnel::identity(&project::client_root()?)?;
 
     let paired = client::pair(
         &host,
@@ -54,7 +55,6 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
     let ssh_port = None;
     let known_hosts = core_keys::learn_host(&host, ssh_port, &paired.host_keys)?;
 
-    let mut config = Config::load_or_empty()?;
     config.upsert(Agent {
         name: name.clone(),
         host: host.clone(),
@@ -66,6 +66,7 @@ pub async fn link(code: String, name: Option<String>) -> anyhow::Result<i32> {
         program: paired.program.clone(),
         addresses: paired.addresses.clone(),
         iroh: paired.iroh.clone(),
+        client: Some(client_name),
         specs: Some(paired.specs),
     });
 

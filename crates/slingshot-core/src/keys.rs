@@ -12,10 +12,16 @@ pub fn marker(client_name: &str) -> String {
     format!("slingshot:{client_name}")
 }
 
-/// What this machine calls itself to an Agent. `link` labels its installed key with it and
-/// `unlink` revokes by that label, so every caller has to get the same answer.
+/// This machine's hostname, which Clients linked before unique names still go by.
 pub fn client_name() -> String {
     sysinfo::System::host_name().unwrap_or_else(|| "client".to_string())
+}
+
+/// A name no other Client shares, even one with the same hostname: the hostname plus the
+/// start of `id`, a key that belongs to this machine alone.
+pub fn unique_client_name(hostname: &str, id: &str) -> String {
+    let short: String = id.chars().take(6).collect();
+    format!("{hostname}-{short}")
 }
 
 /// Where sshd publishes the public half of a machine's host keys.
@@ -192,6 +198,15 @@ mod tests {
     #[test]
     fn the_marker_names_the_client() {
         assert_eq!(marker("laptop"), "slingshot:laptop");
+    }
+
+    #[test]
+    fn two_clients_with_one_hostname_get_different_names() {
+        let first = unique_client_name("MacBook-Pro", "3f9c2ab71e");
+        let second = unique_client_name("MacBook-Pro", "8d04e6c9b2");
+
+        assert_eq!(first, "MacBook-Pro-3f9c2a");
+        assert_ne!(first, second);
     }
 
     /// The bug this guards against: a key arrives already carrying somebody else's

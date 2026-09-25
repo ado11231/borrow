@@ -1,5 +1,6 @@
 //! Where the Client remembers which Agent to talk to.
 
+use crate::keys;
 use crate::network::Network;
 use crate::protocol::{DEFAULT_PORT, Specs};
 use anyhow::Context;
@@ -50,6 +51,10 @@ pub struct Agent {
     /// The box's iroh public key. Configs saved before iroh have none.
     #[serde(default)]
     pub iroh: Option<String>,
+    /// The name this box knows this machine by. Links saved before unique names have none
+    /// and go by the hostname.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
     /// What the box is, fetched once at pairing so `info` is instant.
     pub specs: Option<Specs>,
 }
@@ -58,6 +63,12 @@ impl Agent {
     /// The daemon port to dial, falling back to the built in default.
     pub fn daemon_port(&self) -> u16 {
         self.daemon_port.unwrap_or(DEFAULT_PORT)
+    }
+
+    /// The name this box knows this machine by. `link` labels the installed key with it and
+    /// `unlink` removes the key by it, so both must get the same answer.
+    pub fn client_name(&self) -> String {
+        self.client.clone().unwrap_or_else(keys::client_name)
     }
 
     /// The Slingshot program to start over SSH. Pairing records the Agent's own path, so a
@@ -167,6 +178,17 @@ impl Config {
 
     /// Add a box, or replace the entry of the same name when pairing again. The
     /// first box paired becomes the default, so `run` works with no flags.
+    /// The name to link the box at `host` under. A box already saved keeps its name, so
+    /// linking again replaces the old key instead of leaving it behind. A new box gets a name
+    /// unique to this machine, made from `id`.
+    pub fn client_for(&self, host: &str, id: &str) -> String {
+        self.agents
+            .iter()
+            .find(|agent| agent.host == host || agent.addresses.iter().any(|a| a == host))
+            .map(Agent::client_name)
+            .unwrap_or_else(|| keys::unique_client_name(&keys::client_name(), id))
+    }
+
     pub fn upsert(&mut self, agent: Agent) {
         self.agents.retain(|a| a.name != agent.name);
 
@@ -341,8 +363,42 @@ mod tests {
             program: None,
             addresses: Vec::new(),
             iroh: None,
+            client: None,
             specs: None,
         }
+    }
+
+    #[test]
+    fn a_new_box_gets_a_name_unique_to_this_machine() {
+        let name = config("").client_for("192.168.1.9", "3f9c2ab71e");
+
+        assert!(name.ends_with("-3f9c2a"), "name was: {name}");
+    }
+
+    #[test]
+    fn linking_a_saved_box_again_keeps_its_name() {
+        let mut config = config("");
+        let mut saved = agent("archbox");
+        saved.client = Some("laptop-8d04e6".to_string());
+        saved.addresses = vec!["100.64.0.2".to_string()];
+        config.upsert(saved);
+
+        assert_eq!(
+            config.client_for("archbox.local", "3f9c2a"),
+            "laptop-8d04e6"
+        );
+        assert_eq!(config.client_for("100.64.0.2", "3f9c2a"), "laptop-8d04e6");
+    }
+
+    #[test]
+    fn a_box_linked_before_unique_names_keeps_the_hostname() {
+        let mut config = config("");
+        config.upsert(agent("archbox"));
+
+        assert_eq!(
+            config.client_for("archbox.local", "3f9c2a"),
+            keys::client_name()
+        );
     }
 
     #[test]

@@ -5,7 +5,7 @@ use crate::project;
 use crate::ssh::RemoteCommand;
 use slingshot_core::config::Config;
 use slingshot_core::control::{Request, Response};
-use slingshot_core::keys::{client_name, marker};
+use slingshot_core::keys::marker;
 use slingshot_core::presentation;
 use slingshot_core::step;
 
@@ -15,7 +15,7 @@ use slingshot_core::step;
 pub async fn unlink(agent: Option<String>) -> anyhow::Result<i32> {
     let mut config = Config::load()?;
     let target = config.resolve(agent.as_deref())?.clone();
-    let client = client_name();
+    let client = target.client_name();
     let tag = marker(&client);
     let client_root = project::client_root()?;
     let registered = project::for_agent(&client_root, &target.name)?;

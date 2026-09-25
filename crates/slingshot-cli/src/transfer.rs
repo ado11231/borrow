@@ -37,7 +37,7 @@ pub async fn open(agent: &Agent, local: &Local) -> anyhow::Result<ProjectSession
     let reference = ProjectRef {
         id: id.clone(),
         name: local.name.clone(),
-        client: slingshot_core::keys::client_name(),
+        client: agent.client_name(),
     };
     let Response::Project(project) = control.call(Request::Open(reference)).await? else {
         return Err(unexpected());
