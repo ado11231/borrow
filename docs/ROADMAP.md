@@ -2,7 +2,7 @@
 
 * What Slingshot does today, what has been tested, and what comes next.
 * A feature is listed as complete only after it has run on real machines.
-* Last updated September 24, 2026.
+* Last updated September 25, 2026.
 
 ## Contents
 
@@ -40,6 +40,17 @@
 * `slingshot link` installs the Client's key on the Agent. The Client needs no ssh server.
 * `slingshot run` runs a command on the Agent with live output, typing, Ctrl C, and the real exit code.
 * `slingshot info` and `slingshot health` show the Agent's hardware and current use.
+
+### Phase 2: Mounting The Project On The Agent
+
+* Built on September 7 and 8, 2026, then replaced by phase 3 on September 13.
+* The Agent mounted the Client's project folder over SSHFS, a network file system that runs over ssh, and ran work inside it. Build output went to the Agent's own disk.
+* It was replaced because:
+  * The Agent had to connect back to the Client, so the Client needed its own ssh server. Most people do not run one.
+  * Every file operation crossed the network, which made builds slow.
+  * A stale mount could hang a build, and file watchers missed changes.
+* Phase 3 kept its project recognition for Rust, Node, and Python, and its separate Agent storage for build output.
+* The last of the mount code was removed on September 20, 2026.
 
 ### Phase 3: Source Copies, Sessions, And Live Status
 
