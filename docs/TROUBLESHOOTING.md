@@ -133,11 +133,11 @@
 ### Tool Still Missing
 
 * **Message:** `Docker is still missing. Check the output above, then run slingshot tools again`
-* **Meaning:** An install command failed, or the tool was installed in a folder the Agent's login shell does not search.
+* **Meaning:** An install command failed, or the tool was installed in a folder Slingshot does not search. Slingshot searches the Agent's login PATH plus `~/.local/bin` and `~/.cargo/bin`.
 * **Fix:**
 
 1. Read the error printed during the install, and fix it.
-2. If the installer said a folder such as `~/.local/bin` is not on your PATH, add it in the Agent's shell startup file.
+2. If the installer put the tool in another folder, add that folder to the PATH in the Agent's `~/.profile` or `~/.bash_profile`.
 3. Run `slingshot tools` again.
 
 ### Sign In Did Not Finish
