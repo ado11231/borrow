@@ -145,7 +145,7 @@ flowchart TD
 2. On the Client, `slingshot link <code>` connects to that port. Both sides turn the secret into a shared key with SPAKE2, a method that never sends the secret itself.
 3. The Client sends its public ssh key and iroh identity, with a proof made from the shared key.
 4. The Agent checks the proof. The code works once, expires after 10 minutes, and is burned after 3 wrong tries.
-5. The Agent installs the key under a recognizable name, so it can be removed later.
+5. The Agent installs the key under the Client's name, such as `slingshot:MacBook-Pro-3f9c2a`, so it can be removed later. The name is the hostname plus the start of the Client's iroh key, so two Clients with the same hostname never replace each other.
 6. The Agent replies with its ssh identity, addresses, iroh identity, and hardware details, with its own proof.
 7. The Client checks that proof, so a machine pretending to be the Agent is caught. It saves the details, and from then on reaches the Agent without asking you anything.
 

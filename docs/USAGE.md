@@ -64,6 +64,9 @@
 3. Once linked, the Client reaches the Agent from any network.
 4. Slingshot then offers to set up your tools on the Agent. See the next section.
 
+* Each machine links under its own name, such as `MacBook-Pro-3f9c2a`, so two machines with the same hostname can use one Agent without replacing each other.
+* Linking an Agent again keeps the name it had. Machines linked before September 25, 2026 go by their hostname alone. To get a unique name, run `slingshot unlink`, then link again.
+
 | Option | Effect |
 | --- | --- |
 | `--name <name>` | Save the Agent under a name of your choice. |

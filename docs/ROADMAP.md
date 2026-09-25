@@ -122,7 +122,7 @@
 * `slingshot start` does not start on its own when the Agent restarts.
 * The tools step has not run on real machines. Only its failure when the Agent is off has been seen.
 * The tools step installs Docker only with `pacman`, `apt`, `dnf`, and `zypper`, and Git, Node, and Python only with the package managers it knows.
-* File watchers inside sessions, several Clients on one Agent account, and large Node and Python projects are untested.
+* File watchers inside sessions, several Clients on one Agent account, and large Node and Python projects are untested. Each Client now links under a unique name, but two Clients have not been linked to one Agent yet.
 * `slingshot.toml` supports only `sync.exclude`. Other settings have no effect.
 * Pairing across networks is not supported. Both machines must share a network or tailnet to link.
 * The new pairing has only been tested on one Mac. A successful link between two machines with it has not been run yet.
