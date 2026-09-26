@@ -38,15 +38,18 @@ pub async fn offer(target: &Agent) -> anyhow::Result<()> {
         checking.done(format!("{} has every tool this machine uses", target.name));
         return Ok(());
     }
-    checking.done(format!(
+    checking.warn(format!(
         "{} is missing {}",
         target.name,
         plural(offered.len(), "tool")
     ));
 
     let manager = before.manager.as_deref();
-    eprint!("\n{}\n", plan(&offered, manager, Style::stderr()));
-    let script = tools::install_script(&offered, manager);
+    eprint!(
+        "\n{}\n",
+        plan(&offered, manager, before.npm_writable, Style::stderr())
+    );
+    let script = tools::install_script(&offered, manager, before.npm_writable);
     if script.is_empty() {
         return Ok(());
     }
@@ -162,10 +165,15 @@ fn announce(action: &str, target: &Agent) {
 
 /// Each missing tool with the exact commands that will run, or a warning when Slingshot has
 /// none it trusts on that Agent.
-fn plan(offered: &[Tool], manager: Option<&str>, style: Style) -> String {
+fn plan(
+    offered: &[Tool],
+    manager: Option<&str>,
+    npm_writable: Option<bool>,
+    style: Style,
+) -> String {
     let mut output = String::new();
     for tool in offered {
-        match tool.install(manager) {
+        match tool.install(manager, npm_writable) {
             Some(commands) => {
                 for (index, command) in commands.iter().enumerate() {
                     let label = if index == 0 { tool.name() } else { "" };
@@ -229,6 +237,7 @@ mod tests {
         let text = plan(
             &[Tool::Git, Tool::Docker],
             Some("pacman"),
+            None,
             Style::new(false),
         );
 
@@ -239,9 +248,11 @@ mod tests {
 
     #[test]
     fn the_plan_says_when_a_tool_must_be_installed_by_hand() {
-        let text = plan(&[Tool::Docker], Some("brew"), Style::new(false));
+        let text = plan(&[Tool::Docker], Some("brew"), None, Style::new(false));
 
         assert!(text.contains("No install command for brew"), "{text}");
-        assert!(plan(&[Tool::Git], None, Style::new(false)).contains("No package manager found"));
+        assert!(
+            plan(&[Tool::Git], None, None, Style::new(false)).contains("No package manager found")
+        );
     }
 }

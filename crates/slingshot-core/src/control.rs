@@ -14,7 +14,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Wire version of this control protocol. Both machines must agree on it, so any change
 /// to a request or response shape has to raise it.
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 8;
 
 /// Largest frame in either direction. Manifests for very large projects are the limit.
 pub const MAX_FRAME: u32 = 16 * 1024 * 1024;
@@ -119,6 +119,10 @@ pub struct AgentTools {
     pub manager: Option<String>,
     /// The account's login shell, which runs install commands so they see a session's PATH.
     pub shell: String,
+    /// Whether this account can write npm's global folder, so Codex installs without
+    /// `sudo`. `None` when npm is not installed yet.
+    #[serde(default)]
+    pub npm_writable: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -306,6 +310,7 @@ mod tests {
             installed: vec![Tool::Git, Tool::ClaudeCode],
             manager: Some("pacman".into()),
             shell: "/usr/bin/bash".into(),
+            npm_writable: Some(false),
         });
         write_frame(&mut a, &reply).await.unwrap();
 
@@ -315,5 +320,6 @@ mod tests {
         assert_eq!(back.installed, vec![Tool::Git, Tool::ClaudeCode]);
         assert_eq!(back.manager.as_deref(), Some("pacman"));
         assert_eq!(back.shell, "/usr/bin/bash");
+        assert_eq!(back.npm_writable, Some(false));
     }
 }

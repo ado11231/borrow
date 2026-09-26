@@ -98,17 +98,25 @@ impl Tool {
         }
     }
 
-    /// The commands that install this tool on an Agent using `manager`. `None` means
-    /// Slingshot has no command it trusts there, so the person installs it themselves.
-    pub fn install(self, manager: Option<&str>) -> Option<Vec<String>> {
+    /// The commands that install this tool on an Agent using `manager`, where `npm_writable`
+    /// says whether npm's global folder needs `sudo`. `None` means Slingshot has no command it
+    /// trusts there, so the person installs it themselves.
+    pub fn install(self, manager: Option<&str>, npm_writable: Option<bool>) -> Option<Vec<String>> {
         match self {
             Tool::Rust => Some(vec![
                 "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y".into(),
             ]),
-            Tool::ClaudeCode => Some(vec!["curl -fsSL https://claude.ai/install.sh | bash".into()]),
-            Tool::Codex => Some(vec![
-                "if [ -w \"$(npm prefix -g)\" ]; then npm install -g @openai/codex; else sudo npm install -g @openai/codex; fi".into(),
+            Tool::ClaudeCode => Some(vec![
+                "curl -fsSL https://claude.ai/install.sh | bash".into(),
             ]),
+            Tool::Codex => {
+                let sudo = npm_writable.map_or(manager != Some("brew"), |writable| !writable);
+                let command = "npm install -g @openai/codex";
+                Some(vec![match sudo {
+                    true => format!("sudo {command}"),
+                    false => command.to_string(),
+                }])
+            }
             Tool::Docker => {
                 let manager = manager?;
                 let mut commands = vec![install_command(manager, self.packages(manager)?)?];
@@ -191,15 +199,30 @@ pub fn with_user_folders(path: &str, home: &Path) -> String {
         .join(":")
 }
 
-/// A script that prints the program name of each tool it finds. The Agent runs it in a
-/// login shell with the per user folders added, so it sees what a session and a run do.
+/// A script that prints the program name of each tool it finds, then whether npm's global
+/// folder is writable. The Agent runs it in a login shell with the per user folders added,
+/// so it sees what a session and a run do.
 pub fn probe_script() -> String {
     let programs: Vec<&str> = ALL.iter().map(|tool| tool.program()).collect();
     format!(
-        "{}; for program in {}; do if command -v \"$program\" >/dev/null 2>&1; then echo \"$program\"; fi; done",
+        "{}; for program in {}; do if command -v \"$program\" >/dev/null 2>&1; then echo \"$program\"; fi; done; \
+         if command -v npm >/dev/null 2>&1; then if [ -w \"$(npm prefix -g)\" ]; then echo {NPM_WRITABLE}; else echo {NPM_ROOT}; fi; fi",
         user_path_line(),
         programs.join(" ")
     )
+}
+
+const NPM_WRITABLE: &str = "npm:writable";
+const NPM_ROOT: &str = "npm:root";
+
+/// Whether the output of `probe_script` says npm's global folder is writable, or `None`
+/// when npm is not installed.
+pub fn npm_writable(output: &str) -> Option<bool> {
+    output.lines().find_map(|line| match line.trim() {
+        NPM_WRITABLE => Some(true),
+        NPM_ROOT => Some(false),
+        _ => None,
+    })
 }
 
 /// The tools named in the output of `probe_script`.
@@ -210,17 +233,23 @@ pub fn found(output: &str) -> Vec<Tool> {
         .collect()
 }
 
-/// One script that installs `tools` in order and names each before it starts. It keeps
+/// One script that installs `tools` in order, with a numbered heading before each. It keeps
 /// going after a failure, because the Agent is checked again afterwards to see what worked.
 /// Tools without a command are left out.
-pub fn install_script(tools: &[Tool], manager: Option<&str>) -> String {
+pub fn install_script(tools: &[Tool], manager: Option<&str>, npm_writable: Option<bool>) -> String {
+    let planned: Vec<(Tool, Vec<String>)> = tools
+        .iter()
+        .filter_map(|tool| Some((*tool, tool.install(manager, npm_writable)?)))
+        .collect();
     let mut lines = Vec::new();
-    for tool in tools {
-        let Some(commands) = tool.install(manager) else {
-            continue;
-        };
-        lines.push(format!("echo; echo 'Installing {}'", tool.name()));
-        lines.extend(commands);
+    for (index, (tool, commands)) in planned.iter().enumerate() {
+        lines.push(format!(
+            "echo; echo '▶ {} ({} of {})'; echo",
+            tool.name(),
+            index + 1,
+            planned.len()
+        ));
+        lines.extend(commands.iter().cloned());
     }
     lines.join("\n")
 }
@@ -269,7 +298,7 @@ mod tests {
 
     #[test]
     fn docker_on_linux_also_starts_the_service_and_joins_the_group() {
-        let commands = Tool::Docker.install(Some("pacman")).unwrap();
+        let commands = Tool::Docker.install(Some("pacman"), None).unwrap();
 
         assert_eq!(commands[0], "sudo pacman -S docker");
         assert!(
@@ -279,32 +308,32 @@ mod tests {
         );
         assert!(commands.iter().any(|c| c.contains("usermod -aG docker")));
         assert_eq!(
-            Tool::Docker.install(Some("apt")).unwrap()[0],
+            Tool::Docker.install(Some("apt"), None).unwrap()[0],
             "sudo apt install docker.io"
         );
     }
 
     #[test]
     fn tools_without_a_trusted_command_are_left_to_the_person() {
-        assert_eq!(Tool::Docker.install(Some("brew")), None);
-        assert_eq!(Tool::Git.install(None), None);
-        assert_eq!(Tool::Node.install(Some("zypper")), None);
+        assert_eq!(Tool::Docker.install(Some("brew"), None), None);
+        assert_eq!(Tool::Git.install(None, None), None);
+        assert_eq!(Tool::Node.install(Some("zypper"), None), None);
     }
 
     #[test]
     fn installers_that_need_no_package_manager_always_have_a_command() {
         for tool in [Tool::Rust, Tool::ClaudeCode, Tool::Codex] {
-            assert!(tool.install(None).is_some(), "{tool:?}");
+            assert!(tool.install(None, None).is_some(), "{tool:?}");
         }
     }
 
     #[test]
     fn the_install_script_names_each_tool_and_skips_ones_without_a_command() {
-        let script = install_script(&[Tool::Git, Tool::Docker, Tool::Rust], Some("brew"));
+        let script = install_script(&[Tool::Git, Tool::Docker, Tool::Rust], Some("brew"), None);
 
-        assert!(script.contains("echo 'Installing Git'\nbrew install git"));
+        assert!(script.contains("echo '▶ Git (1 of 2)'; echo\nbrew install git"));
         assert!(!script.contains("Docker"));
-        assert!(script.contains("Installing Rust"));
+        assert!(script.contains("▶ Rust (2 of 2)"));
     }
 
     #[test]
@@ -330,6 +359,45 @@ mod tests {
         assert!(
             probe_script().starts_with("export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\";")
         );
+    }
+
+    #[test]
+    fn codex_uses_sudo_only_when_npm_needs_it() {
+        let codex = |manager, writable| Tool::Codex.install(manager, writable).unwrap()[0].clone();
+
+        assert_eq!(
+            codex(Some("pacman"), Some(false)),
+            "sudo npm install -g @openai/codex"
+        );
+        assert_eq!(
+            codex(Some("pacman"), Some(true)),
+            "npm install -g @openai/codex"
+        );
+        assert_eq!(
+            codex(Some("pacman"), None),
+            "sudo npm install -g @openai/codex"
+        );
+        assert_eq!(codex(Some("brew"), None), "npm install -g @openai/codex");
+    }
+
+    #[test]
+    fn the_probe_reports_whether_npm_is_writable() {
+        assert_eq!(npm_writable("git\nnode\nnpm:root\n"), Some(false));
+        assert_eq!(npm_writable("node\nnpm:writable\n"), Some(true));
+        assert_eq!(npm_writable("git\n"), None);
+        assert_eq!(found("git\nnpm:root\n"), vec![Tool::Git]);
+    }
+
+    #[test]
+    fn the_scripts_are_valid_shell() {
+        let install = install_script(&ALL, Some("pacman"), Some(false));
+        for script in [probe_script(), install] {
+            let status = std::process::Command::new("sh")
+                .args(["-n", "-c", &script])
+                .status()
+                .unwrap();
+            assert!(status.success(), "{script}");
+        }
     }
 
     #[test]

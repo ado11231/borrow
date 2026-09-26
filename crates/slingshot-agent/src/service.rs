@@ -257,10 +257,12 @@ fn agent_tools(root: &Path) -> anyhow::Result<AgentTools> {
         .stderr(std::process::Stdio::null())
         .output()
         .with_context(|| format!("Could not start the login shell {shell} on the Agent"))?;
+    let output = String::from_utf8_lossy(&output.stdout);
     Ok(AgentTools {
-        installed: tools::found(&String::from_utf8_lossy(&output.stdout)),
+        installed: tools::found(&output),
         manager: preflight::package_manager().map(str::to_string),
         shell,
+        npm_writable: tools::npm_writable(&output),
     })
 }
 
