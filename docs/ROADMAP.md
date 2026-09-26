@@ -91,13 +91,15 @@
 6. Sessions start in the login shell with full color, `UTF-8`, mouse scrolling, a quiet bar, and a readable `~/Slingshot/<project>` path.
 7. `slingshot menubar` builds, signs, and installs the app itself, and rebuilds it only when its source changed.
 8. `link` ends by offering to install the Client's tools on the Agent, then starts the sign in for Claude Code and Codex. `slingshot tools` repeats it later.
+9. The tool check, sign ins, and runs also search `~/.local/bin` and `~/.cargo/bin` on the Agent, where installers such as Claude Code's put programs.
+10. The tools step shows one plain command per tool, warns when tools are missing, and numbers each install.
+11. A run ended by Ctrl C or `slingshot stop` is reported as stopped, not failed.
 
 * **Remaining:**
 
 1. Automatic port forwarding, so the Agent's port 3000 appears at `localhost:3000` on the Client.
 2. Notifications when a server is ready and when a job waits for input.
-3. Find tools installed in per user folders such as `~/.local/bin`. Today Claude Code installs there on Arch Linux and is then reported as missing, which also skips its sign in.
-4. Clearer tools output: a warning symbol for missing tools, one readable command per tool, and installer output set apart.
+3. See the new tools output, with a tool actually missing, on real machines.
 
 ## Planned
 
@@ -120,9 +122,7 @@
 ## Known Limitations
 
 * `slingshot start` does not start on its own when the Agent restarts.
-* The tools step does not find tools installed in per user folders such as `~/.local/bin` when that folder is not on the Agent's login PATH. Claude Code is one. Run it inside `slingshot attach` instead, which does find it.
 * The first connection over iroh after the Agent restarts can take about 13 seconds. Later ones take about 1 second.
-* A run stopped with `slingshot stop` is reported as failed, with exit code 130.
 * Edits a coding agent makes on the Agent stay there until `slingshot sync --pull`.
 * The tools step installs Docker only with `pacman`, `apt`, `dnf`, and `zypper`, and Git, Node, and Python only with the package managers it knows.
 * File watchers inside sessions, several Clients on one Agent account, and large Node and Python projects are untested. Each Client now links under a unique name, but two Clients have not been linked to one Agent at the same time yet.
@@ -200,3 +200,12 @@
 9. After `slingshot start` was restarted, the Mac reconnected over iroh without linking again. The first connection took 13 seconds.
 10. `unlink` refused while a session was open, then removed only this Client's key, iroh access, and environment file.
 11. Linking the new Client to an Agent running the previous version printed an instruction to update that Agent.
+
+### Fixes From The Fresh Install: September 25, 2026
+
+* Both machines were updated to control protocol 8.
+
+1. `slingshot tools` found Claude Code in `~/.local/bin` and reported that archbox has every tool.
+2. `slingshot run claude --version` printed the Claude Code version. The run's PATH began with `~/.local/bin` and `~/.cargo/bin`.
+3. A run stopped with `slingshot stop` ended with `! Stopped in 8.4s · exit 130`.
+4. archbox's npm folder belongs to root, so the tools step would offer `sudo npm install -g @openai/codex`.
