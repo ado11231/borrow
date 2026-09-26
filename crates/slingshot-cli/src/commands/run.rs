@@ -67,14 +67,19 @@ pub async fn run(agent: Option<String>, cmd: Vec<String>) -> anyhow::Result<i32>
     Ok(code)
 }
 
-/// The last line of a run: how long it took and how the command exited.
+/// The last line of a run: how long it took and how the command exited. Exit 130 means
+/// the command ended on Ctrl C or `slingshot stop`, which someone chose, so it is not a failure.
 fn finished(code: i32, took: Duration, style: Style) -> String {
     let took = step::elapsed(took);
     match code {
         0 => style.status(format!("Done in {took} · exit 0"), Tone::Good),
+        STOPPED => style.status(format!("Stopped in {took} · exit {code}"), Tone::Warning),
         code => style.status(format!("Failed in {took} · exit {code}"), Tone::Error),
     }
 }
+
+/// 128 plus SIGINT, the exit code of a command ended by Ctrl C or `slingshot stop`.
+const STOPPED: i32 = 130;
 
 /// Run an interactive remote command, replacing SSH's messages about a dropped connection
 /// with `lost`. When SSH exits 255 silently, a quick check tells a keepalive timeout
@@ -193,6 +198,10 @@ mod tests {
         assert_eq!(
             finished(101, Duration::from_millis(1_200), plain),
             "✗ Failed in 1.2s · exit 101"
+        );
+        assert_eq!(
+            finished(130, Duration::from_millis(4_500), plain),
+            "! Stopped in 4.5s · exit 130"
         );
     }
 
