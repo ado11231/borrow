@@ -119,9 +119,7 @@ pub async fn start(name: Option<String>, port: u16) -> anyhow::Result<i32> {
             Some(awake)
         }
         None => {
-            presentation::warning(
-                "Could not stop this machine from sleeping. If it sleeps, other machines cannot reach it until it wakes",
-            );
+            presentation::warning(sleep_warning(std::env::var_os("SSH_CONNECTION").is_some()));
             None
         }
     };
@@ -154,6 +152,19 @@ pub async fn start(name: Option<String>, port: u16) -> anyhow::Result<i32> {
     presentation::success(format!("Stopped Slingshot on {name}"));
 
     Ok(0)
+}
+
+/// Why the machine may sleep. Over ssh the system only allows the lock with a password,
+/// which Slingshot never asks for, so the fix is to start it at the machine.
+fn sleep_warning(over_ssh: bool) -> &'static str {
+    match over_ssh {
+        true => {
+            "Started over ssh, so this machine may still sleep. Run slingshot start at the machine to keep it awake"
+        }
+        false => {
+            "Could not stop this machine from sleeping. If it sleeps, other machines cannot reach it until it wakes"
+        }
+    }
 }
 
 /// Say once whether other networks can reach this box, before the pairing code so the code
@@ -529,6 +540,12 @@ mod tests {
             Response::Error { message } => message,
             other => panic!("expected an error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn the_sleep_warning_says_what_to_do_over_ssh() {
+        assert!(sleep_warning(true).contains("Run slingshot start at the machine"));
+        assert!(sleep_warning(false).contains("Could not stop this machine from sleeping"));
     }
 
     #[test]

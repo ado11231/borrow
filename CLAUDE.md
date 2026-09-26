@@ -313,7 +313,7 @@
 ## 15. Current State
 
 * **Phases 1 and 3 are complete.** Phase 4, reaching the Agent from any network, is in final testing. Phase 5 is in progress: the menu bar app and notifications are built, and automatic port forwarding is not.
-* **246 tests pass**, and formatting and Clippy pass.
+* **247 tests pass**, and formatting and Clippy pass.
 * **The rename from borrow has no migration.** Both machines must run `slingshot link` again after updating.
 * Everything under [known limitations](docs/ROADMAP.md#known-limitations) does not work yet. Never describe it as working.
 * The full [test record](docs/ROADMAP.md#test-record) is in the roadmap.

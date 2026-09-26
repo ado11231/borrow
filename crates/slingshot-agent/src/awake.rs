@@ -34,9 +34,12 @@ pub fn hold() -> Option<Awake> {
 }
 
 /// logind's inhibitor lives as long as the command it runs, here a `cat` reading from us.
+/// It never asks for a password: polkit wants one outside a session at the machine, such
+/// as over ssh, and a prompt there is a surprise nobody asked for.
 fn systemd_inhibit() -> Tool {
     let mut command = Command::new("systemd-inhibit");
     command.args([
+        "--no-ask-password",
         "--what=idle:sleep",
         "--who=Slingshot",
         "--why=Reachable by paired Clients",
